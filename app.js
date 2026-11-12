@@ -48,7 +48,13 @@ function toast(msg) {
 
 // ---------- Regras de treino ----------
 const exerciciosDe = (t) => t.blocos.flatMap((b) => b.exercicios);
-const fichaDoDia = (d = new Date()) => PLANO_SEMANAL[d.getDay()];
+// Sugestão: a ficha seguinte à última feita, na ordem de FICHAS (A1 quando ainda não há treinos)
+function proximaFicha() {
+  const ult = sessoesOrdenadas()[0];
+  if (!ult) return FICHAS[0];
+  return FICHAS[(FICHAS.indexOf(ult.treino) + 1) % FICHAS.length];
+}
+let fichaEscolhida = null; // escolha feita na tela Hoje (vale até recarregar o app)
 const sessoesOrdenadas = () => [...db.sessoes].sort((a, b) => b.inicio - a.inicio);
 
 function ultimoRegistro(exId, excetoId) {
@@ -224,7 +230,8 @@ window.addEventListener('hashchange', render);
 function telaHoje() {
   const hoje = new Date();
   const iso = isoDia(hoje);
-  const ficha = fichaDoDia(hoje);
+  const sugestao = proximaFicha();
+  const ficha = fichaEscolhida || sugestao;
   const feitasHoje = db.sessoes.filter((s) => s.data === iso);
   let h = `<p class="muted">${fmtDataLonga(iso)}</p><h1>Hoje</h1>`;
 
@@ -236,44 +243,40 @@ function telaHoje() {
       <h2 style="margin-top:8px">${esc(t.titulo)} · ${esc(t.tipo)}</h2>
       <p class="muted small">${feitas} de ${total} séries feitas</p>
       <a class="btn" href="#/treino">Continuar treino</a></div>`;
-  } else if (!ficha) {
-    h += `<div class="card"><h2>Dia de descanso</h2><p class="muted">Recupere bem. Se quiser treinar mesmo assim, escolha uma ficha abaixo.</p></div>`;
   } else {
     const t = TREINOS[ficha];
-    const feito = feitasHoje.find((s) => s.treino === ficha);
-    if (!t) {
-      h += `<div class="card"><span class="tag">${ficha} · ${TIPO_FICHA[ficha]}</span><h2 style="margin-top:8px">Ficha ${ficha} ainda não cadastrada</h2>
-        <p class="muted small">Assim que a ficha for enviada, ela aparece aqui.</p></div>`;
-    } else {
-      const ult = sessoesOrdenadas().find((s) => s.treino === ficha);
-      h += `<div class="card destaque">
-        <div class="linha entre"><span class="tag ac">Treino do dia</span>${feito ? '<span class="tag ok">✓ Feito hoje</span>' : ''}</div>
-        <h2 style="margin-top:8px">${esc(t.titulo)} · ${esc(t.tipo)}</h2>
-        <p class="muted small">${esc(t.resumo)}</p>
-        <p class="muted small">${exerciciosDe(t).length} exercícios · ${contarSeries(t, {}).total} séries${ult ? ` · último em ${fmtData(ult.data)}` : ''}</p>
-        <button class="btn" data-acao="iniciar" data-ficha="${ficha}">${feito ? 'Treinar de novo' : 'Iniciar treino'}</button></div>`;
-    }
+    const ult = sessoesOrdenadas().find((s) => s.treino === ficha);
+    const rotulo = ficha === sugestao ? 'Próximo da sequência' : 'Escolhido para hoje';
+    h += `<div class="card destaque">
+      <div class="linha entre"><span class="tag ac">${rotulo}</span>${feitasHoje.length ? `<span class="tag ok">✓ Hoje: ${feitasHoje.map((s) => s.treino).join(', ')}</span>` : ''}</div>
+      <h2 style="margin-top:8px">${esc(t.titulo)} · ${esc(t.tipo)}</h2>
+      <p class="muted small">${esc(t.resumo)}</p>
+      <p class="muted small">${exerciciosDe(t).length} exercícios · ${contarSeries(t, {}).total} séries${ult ? ` · último em ${fmtData(ult.data)}` : ' · nunca feito'}</p>
+      <button class="btn" data-acao="iniciar" data-ficha="${ficha}">Iniciar ${esc(ficha)}</button></div>`;
   }
 
-  // Semana atual (segunda a domingo)
+  if (!db.ativa) {
+    h += `<h3>Escolha o treino de hoje</h3><div class="fichas">`;
+    for (const f of FICHAS) {
+      const ult = sessoesOrdenadas().find((s) => s.treino === f);
+      h += `<button class="ficha ${f === ficha ? 'sel' : ''}" data-acao="escolher" data-ficha="${f}">
+        <b>${f}</b><span>${TIPO_FICHA[f]}</span><span>${ult ? 'Último ' + fmtData(ult.data) : 'Nunca feito'}</span>
+        ${f === sugestao ? '<span class="prox">próximo</span>' : ''}</button>`;
+    }
+    h += `</div><p class="muted small" style="margin-top:8px">Toque numa ficha para escolher. Qualquer dia pode ser de treino ou de descanso, inclusive o domingo.</p>`;
+  }
+
+  // Semana atual (segunda a domingo): mostra o que foi feito em cada dia
   const seg = new Date(hoje); seg.setDate(hoje.getDate() - ((hoje.getDay() + 6) % 7));
   h += `<h3>Esta semana</h3><div class="semana">`;
   for (let i = 0; i < 7; i++) {
     const d = new Date(seg); d.setDate(seg.getDate() + i);
     const di = isoDia(d);
-    const f = PLANO_SEMANAL[d.getDay()];
-    const feito = db.sessoes.some((s) => s.data === di);
-    h += `<div class="dia ${di === iso ? 'hoje' : ''} ${feito ? 'feito' : ''}">${DIAS[d.getDay()]}<b>${f || '–'}</b></div>`;
+    const feitas = db.sessoes.filter((s) => s.data === di).map((s) => s.treino);
+    h += `<div class="dia ${di === iso ? 'hoje' : ''} ${feitas.length ? 'feito' : ''}">${DIAS[d.getDay()]}<b>${feitas.length ? feitas.join('+') : '–'}</b></div>`;
   }
-  h += `</div>`;
-
-  h += `<h3>Todas as fichas</h3><div class="fichas">`;
-  for (const f of FICHAS) {
-    const ult = sessoesOrdenadas().find((s) => s.treino === f);
-    h += `<button class="ficha ${TREINOS[f] ? '' : 'vazia'}" data-acao="iniciar" data-ficha="${f}">
-      <b>${f}</b><span>${TIPO_FICHA[f]}</span><span>${TREINOS[f] ? (ult ? 'Último ' + fmtData(ult.data) : 'Nunca feito') : 'Sem ficha'}</span></button>`;
-  }
-  h += `</div>`;
+  const naSemana = db.sessoes.filter((s) => s.data >= isoDia(seg)).length;
+  h += `</div><p class="muted small" style="margin-top:8px">${naSemana} treino${naSemana === 1 ? '' : 's'} nesta semana</p>`;
   return h;
 }
 
@@ -411,6 +414,7 @@ function salvarSessao() {
     cardioFinal: f.cardioFinal || null, esforco: f.esforco ?? null, notas: (f.notas || '').trim(),
   };
   db.sessoes.push(sessao);
+  fichaEscolhida = null;
   db.ativa = null;
   salvar();
   toast('Treino salvo 💪');
@@ -545,8 +549,9 @@ function telaAjustes() {
       <p class="muted small">Os dados ficam salvos só neste celular. Faça backup de vez em quando (ex.: salvar no app Arquivos ou iCloud Drive).</p>
       <button class="btn" data-acao="exportar">Exportar backup</button>
       <label class="btn sec">Importar backup<input type="file" accept="application/json,.json" data-acao="importar" hidden></label></div>
-    <div class="card"><h2>Divisão semanal</h2>
-      <p class="small">${[1, 2, 3, 4, 5, 6, 0].map((d) => `${DIAS[d]} ${PLANO_SEMANAL[d] || 'descanso'}`).join(' · ')}</p></div>
+    <div class="card"><h2>Sequência de treinos</h2>
+      <p class="small">Sequência sugerida: ${FICHAS.join(' → ')} → ${FICHAS[0]}</p>
+      <p class="muted small">Não há dia fixo: o app sugere a ficha seguinte à última feita, mas você escolhe qualquer uma, em qualquer dia, inclusive domingo.</p></div>
     <div class="card"><p class="muted small">${db.sessoes.length} treinos salvos.</p>
       <button class="btn perigo" data-acao="apagar-tudo">Apagar todos os dados</button></div>`;
 }
@@ -587,6 +592,7 @@ document.addEventListener('click', (e) => {
   const a = db.ativa;
 
   if (acao === 'iniciar') iniciarTreino(el.dataset.ficha);
+  else if (acao === 'escolher') { fichaEscolhida = el.dataset.ficha; render(); }
   else if (acao === 'video') abrirVideo(el);
 
   else if (acao === 'check') {

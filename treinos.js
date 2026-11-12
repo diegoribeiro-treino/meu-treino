@@ -9,9 +9,8 @@
 // Blocos com modo: 'series' são séries tradicionais (descanso após cada série);
 // sem modo, o bloco é feito em voltas (descanso após cada volta).
 
-// Dia da semana (0 = domingo) -> ficha do dia
-const PLANO_SEMANAL = { 1: 'A1', 2: 'B1', 3: 'A2', 4: 'B2', 5: 'A3', 6: 'B3', 0: null };
-
+// Ordem da sequência. Não há dia fixo: o app sugere a ficha seguinte à última feita,
+// e qualquer ficha pode ser escolhida em qualquer dia (inclusive domingo).
 const FICHAS = ['A1', 'B1', 'A2', 'B2', 'A3', 'B3'];
 
 const TIPO_FICHA = {

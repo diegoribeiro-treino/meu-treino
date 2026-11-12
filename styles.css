@@ -68,7 +68,9 @@ a { color: var(--accent); }
 .ficha { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 8px; text-align: center; color: var(--text); font: inherit; cursor: pointer; }
 .ficha b { display: block; font-size: 20px; }
 .ficha span { display: block; font-size: 11px; color: var(--muted); }
-.ficha.vazia { opacity: .45; }
+.ficha { position: relative; }
+.ficha.sel { border-color: var(--accent); background: var(--accent-soft); }
+.ficha .prox { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; background: var(--accent); color: #fff; padding: 1px 6px; border-radius: 6px; }
 
 /* Execução do treino */
 .topo-treino { position: sticky; top: 0; z-index: 5; background: var(--bg); margin: -16px -16px 0; padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px; border-bottom: 1px solid var(--line); }

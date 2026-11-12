@@ -1,6 +1,6 @@
 // Guarda o app no celular para funcionar sem internet.
 // Ao publicar uma nova versão, aumente o número abaixo.
-const VERSAO = 'meutreino-v3';
+const VERSAO = 'meutreino-v4';
 const ARQUIVOS = ['./', 'index.html', 'styles.css', 'app.js', 'treinos.js', 'manifest.webmanifest',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
