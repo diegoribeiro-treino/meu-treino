@@ -99,7 +99,11 @@ body { padding-top: 0; }
 .ultima {font-size: 13px; color: var(--muted); margin: 6px 0; }
 
 .serie { display: grid; grid-template-columns: 34px 1fr 1fr 52px; gap: 8px; align-items: center; margin-top: 8px; }
-.serie .n { font-size: 13px; color: var(--muted); font-weight: 600; }
+.serie.sem-carga { grid-template-columns: 34px 1fr 52px; }
+.campo.extra { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; }
+.campo.extra span { flex: none; }
+.campo.extra input { padding-right: 10px; }
+.serie .n {font-size: 13px; color: var(--muted); font-weight: 600; }
 .campo { position: relative; }
 .campo input {
   width: 100%; font: inherit; font-size: 18px; font-weight: 600; color: var(--text);
