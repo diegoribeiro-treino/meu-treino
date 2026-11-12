@@ -9,7 +9,11 @@ const UNIDADE_CURTA = { halter: 'kg/h', total: 'kg', unico: 'kg', assist: 'assis
 const SEM_CARGA = (ex) => ex.carga === 'corporal';
 
 function novoDb() {
-  return { versao: 1, sessoes: [], ativa: null, config: { telaLigada: true } };
+  return {
+    versao: 1, sessoes: [], ativa: null, config: { telaLigada: true },
+    fichas: {}, // fichas editadas no app (substituem as de treinos.js)
+    perfil: { nascimento: '', altura: '', pesos: [] }, // pesos: [{ data, kg }]
+  };
 }
 function carregar() {
   try {
@@ -48,6 +52,27 @@ function toast(msg) {
 
 // ---------- Regras de treino ----------
 const exerciciosDe = (t) => t.blocos.flatMap((b) => b.exercicios);
+// Ficha em uso: a versão editada no app, se houver; senão a original de treinos.js
+const fichaDe = (id) => (db.fichas && db.fichas[id]) || TREINOS[id];
+
+// Dados de um exercício pelo id: fichas atuais, depois as originais, depois a cópia guardada na sessão
+// (para exercícios que foram removidos ou trocados depois do treino).
+function exInfo(id, sessao) {
+  for (const f of FICHAS) { const e = exerciciosDe(fichaDe(f)).find((x) => x.id === id); if (e) return e; }
+  for (const f of FICHAS) { const e = exerciciosDe(TREINOS[f]).find((x) => x.id === id); if (e) return e; }
+  const n = sessao && sessao.nomes && sessao.nomes[id];
+  return n ? { id, ...n } : { id, nome: id, grupo: '', carga: 'total', reps: [0, 0] };
+}
+
+// Garante que a sessão em andamento tem séries para todos os exercícios da ficha
+// (a ficha pode ter sido editada no meio do treino).
+function sincronizarSeries(a, t) {
+  for (const b of t.blocos) for (const ex of b.exercicios) {
+    const s = (a.series[ex.id] ??= []);
+    while (s.length < b.voltas) s.push({ kg: s.length ? s[s.length - 1].kg : '', reps: '', ok: false });
+    while (s.length > b.voltas && !s[s.length - 1].ok) s.pop();
+  }
+}
 // Sugestão: a ficha seguinte à última feita, na ordem de FICHAS (A1 quando ainda não há treinos)
 function proximaFicha() {
   const ult = sessoesOrdenadas()[0];
@@ -95,17 +120,15 @@ function metrica(ex, series) {
 
 function contarSeries(t, series) {
   let total = 0, feitas = 0;
-  for (const b of t.blocos) for (const ex of b.exercicios) {
-    total += b.voltas;
-    feitas += (series[ex.id] || []).filter((x) => x.ok).length;
-  }
+  for (const b of t.blocos) total += b.voltas * b.exercicios.length;
+  for (const id in series) feitas += series[id].filter((x) => x.ok).length;
   return { total, feitas };
 }
 
 // ---------- Sessão ativa ----------
 // dataManual (YYYY-MM-DD): registro de um treino feito fora do app, sem cronômetro nem descanso
 function iniciarTreino(fichaId, dataManual = null) {
-  const t = TREINOS[fichaId];
+  const t = fichaDe(fichaId);
   if (!t) return toast(`Ficha ${fichaId} ainda não cadastrada`);
   if (db.ativa) {
     if (db.ativa.treino === fichaId && (db.ativa.dataManual || null) === dataManual) return (location.hash = '#/treino');
@@ -206,22 +229,31 @@ setInterval(tick, 1000);
 
 // ---------- Rotas ----------
 function rotaAtual() {
-  const [pag, arg] = (location.hash.replace(/^#\/?/, '') || 'hoje').split('/');
-  return { pag, arg: arg && decodeURIComponent(arg) };
+  const [pag, ...args] = (location.hash.replace(/^#\/?/, '') || 'hoje').split('/').map(decodeURIComponent);
+  return { pag, arg: args[0], args };
 }
 
-const telas = { hoje: telaHoje, registrar: telaRegistrar, treino: telaTreino, finalizar: telaFinalizar, historico: telaHistorico, sessao: telaSessao, progresso: telaProgresso, exercicio: telaExercicio, ajustes: telaAjustes };
+// As telas de editor.js (Treinos) e relatorios.js (Relatórios) são carregadas antes deste arquivo
+const telas = {
+  hoje: telaHoje, registrar: telaRegistrar, treino: telaTreino, finalizar: telaFinalizar, historico: telaHistorico, sessao: telaSessao,
+  progresso: telaProgresso, exercicio: telaExercicio, ajustes: telaAjustes,
+  treinos: telaTreinos, ficha: telaFicha, 'editar-ex': telaEditarEx, 'editar-bloco': telaEditarBloco, 'editar-textos': telaEditarTextos,
+  relatorios: telaRelatorios,
+};
 
 let ultimaPag = null;
 function render() {
-  const { pag, arg } = rotaAtual();
+  const { pag, arg, args } = rotaAtual();
   const fn = telas[pag] || telaHoje;
   const mesmaPag = pag === ultimaPag;
   const y = window.scrollY;
-  app.innerHTML = fn(arg);
+  app.innerHTML = fn(arg, args);
   window.scrollTo(0, mesmaPag ? y : 0);
   ultimaPag = pag;
-  const aba = { treino: 'hoje', finalizar: 'hoje', registrar: 'hoje', sessao: 'historico', exercicio: 'progresso' }[pag] || pag;
+  const aba = {
+    treino: 'hoje', finalizar: 'hoje', registrar: 'hoje', sessao: 'historico', exercicio: 'progresso',
+    ficha: 'treinos', 'editar-ex': 'treinos', 'editar-bloco': 'treinos', 'editar-textos': 'treinos',
+  }[pag] || pag;
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('sel', a.dataset.tab === aba));
   tick();
   atualizarTelaLigada();
@@ -238,7 +270,7 @@ function telaHoje() {
   let h = `<p class="muted">${fmtDataLonga(iso)}</p><h1>Hoje</h1>`;
 
   if (db.ativa) {
-    const t = TREINOS[db.ativa.treino];
+    const t = fichaDe(db.ativa.treino);
     const { total, feitas } = contarSeries(t, db.ativa.series);
     h += `<div class="card destaque">
       <div class="linha entre"><span class="tag ac">Em andamento</span><span class="cron" id="cron"></span></div>
@@ -246,7 +278,7 @@ function telaHoje() {
       <p class="muted small">${feitas} de ${total} séries feitas</p>
       <a class="btn" href="#/treino">Continuar treino</a></div>`;
   } else {
-    const t = TREINOS[ficha];
+    const t = fichaDe(ficha);
     const ult = sessoesOrdenadas().find((s) => s.treino === ficha);
     const rotulo = ficha === sugestao ? 'Próximo da sequência' : 'Escolhido para hoje';
     h += `<div class="card destaque">
@@ -330,7 +362,8 @@ function checkItem(grupo, i, texto, on) {
 function telaTreino() {
   const a = db.ativa;
   if (!a) return `<div class="vazio"><p>Nenhum treino em andamento.</p><a class="btn" href="#/hoje">Voltar</a></div>`;
-  const t = TREINOS[a.treino];
+  const t = fichaDe(a.treino);
+  sincronizarSeries(a, t);
   const { total, feitas } = contarSeries(t, a.series);
 
   let h = `<div class="topo-treino">
@@ -396,7 +429,7 @@ function telaTreino() {
 
 function atualizarContador() {
   const a = db.ativa; if (!a) return;
-  const { total, feitas } = contarSeries(TREINOS[a.treino], a.series);
+  const { total, feitas } = contarSeries(fichaDe(a.treino), a.series);
   const c = $('#contador'), b = $('#barra');
   if (c) c.textContent = `${feitas}/${total} séries`;
   if (b) b.style.width = `${(feitas / total) * 100}%`;
@@ -406,7 +439,7 @@ function atualizarContador() {
 function telaFinalizar() {
   const a = db.ativa;
   if (!a) { location.hash = '#/hoje'; return ''; }
-  const t = TREINOS[a.treino];
+  const t = fichaDe(a.treino);
   a.fim ??= {};
   const f = a.fim;
   f.duracao ??= a.dataManual ? '' : Math.round((Date.now() - a.inicio) / 60000);
@@ -440,7 +473,12 @@ function salvarSessao() {
     registroManual: !!a.dataManual,
     series: a.series, checks: a.checks, extras: a.extras || {},
     cardioFinal: f.cardioFinal || null, esforco: f.esforco ?? null, notas: (f.notas || '').trim(),
+    nomes: {}, // cópia dos dados de cada exercício, para o histórico sobreviver a edições da ficha
+    planejadas: contarSeries(fichaDe(a.treino), {}).total,
   };
+  for (const ex of exerciciosDe(fichaDe(a.treino))) {
+    sessao.nomes[ex.id] = { nome: ex.nome, grupo: ex.grupo, carga: ex.carga, reps: ex.reps, lado: ex.lado || '' };
+  }
   db.sessoes.push(sessao);
   fichaEscolhida = null;
   db.ativa = null;
@@ -456,9 +494,9 @@ function telaHistorico() {
   if (!lista.length) return `<h1>Histórico</h1><div class="vazio">Nenhum treino registrado ainda.<br>Os treinos finalizados aparecem aqui.</div>${botao}`;
   let h = `<h1>Histórico</h1><p class="muted">${lista.length} treino${lista.length > 1 ? 's' : ''} registrado${lista.length > 1 ? 's' : ''}</p>${botao}<div class="card">`;
   for (const s of lista) {
-    const t = TREINOS[s.treino];
+    const t = fichaDe(s.treino);
     const c = t ? contarSeries(t, s.series) : null;
-    const info = [s.duracaoMin != null ? `${s.duracaoMin} min` : null, c ? `${c.feitas}/${c.total} séries` : null,
+    const info = [s.duracaoMin != null ? `${s.duracaoMin} min` : null, c ? `${c.feitas}/${s.planejadas ?? Math.max(c.total, c.feitas)} séries` : null,
       s.esforco != null ? `esforço ${s.esforco}/10` : null, s.registroManual ? 'registrado depois' : null].filter(Boolean).join(' · ');
     h += `<a class="item" href="#/sessao/${s.id}"><span class="ficha-badge">${esc(s.treino)}</span>
       <div class="cresce"><b>${fmtDataLonga(s.data)}</b>
@@ -471,7 +509,7 @@ function telaHistorico() {
 function telaSessao(id) {
   const s = db.sessoes.find((x) => x.id === id);
   if (!s) return `<div class="vazio">Treino não encontrado.<a class="btn sec" href="#/historico">Voltar</a></div>`;
-  const t = TREINOS[s.treino];
+  const t = fichaDe(s.treino);
   let h = `<a href="#/historico" class="small">‹ Histórico</a><h1>${esc(s.treino)} · ${fmtData(s.data)}</h1>
     <p class="muted">${fmtDataLonga(s.data)}</p>
     <div class="card"><div class="linha entre"><span>Tempo total</span><b>${s.duracaoMin != null ? s.duracaoMin + ' min' : '–'}</b></div>
@@ -479,8 +517,12 @@ function telaSessao(id) {
       <div class="linha entre"><span>Esforço</span><b>${s.esforco ?? '–'}/10</b></div>
       ${s.notas ? `<p class="muted small" style="margin-top:8px">${esc(s.notas)}</p>` : ''}</div>`;
   if (t) {
+    // Exercícios na ordem da ficha atual, seguidos dos que foram feitos mas já não estão nela
+    const ids = exerciciosDe(t).map((x) => x.id);
+    for (const id in s.series) if (!ids.includes(id) && s.series[id].some((x) => x.ok)) ids.push(id);
     h += `<div class="card"><table><tr><th>Exercício</th><th class="num">Séries</th></tr>`;
-    for (const ex of exerciciosDe(t)) {
+    for (const id of ids) {
+      const ex = exInfo(id, s);
       const ser = s.series[ex.id] || [];
       const st = statusProgressao(ex, ser);
       h += `<tr><td>${esc(ex.nome)}${st === 'subir' ? ' <span class="tag up">↑</span>' : ''}</td>
@@ -531,8 +573,8 @@ function grafico(pontos, alto = 70) {
 
 function telaProgresso(fichaSel) {
   const sel = fichaSel || (sessoesOrdenadas()[0] || {}).treino || 'A1';
-  let h = `<h1>Progresso</h1><div class="chips">${FICHAS.map((f) => `<a href="#/progresso/${f}" class="${f === sel ? 'sel' : ''} ${TREINOS[f] ? '' : 'vazia'}">${f}</a>`).join('')}</div>`;
-  const t = TREINOS[sel];
+  let h = `<h1>Progresso</h1><div class="chips">${FICHAS.map((f) => `<a href="#/progresso/${f}" class="${f === sel ? 'sel' : ''} ${fichaDe(f) ? '' : 'vazia'}">${f}</a>`).join('')}</div>`;
+  const t = fichaDe(sel);
   if (!t) return h + `<div class="vazio">Ficha ${sel} ainda não cadastrada.</div>`;
   h += `<p class="muted small" style="margin-top:12px">${esc(t.progressao)}</p>`;
   for (const ex of exerciciosDe(t)) {
@@ -552,8 +594,13 @@ function telaProgresso(fichaSel) {
 
 function telaExercicio(exId) {
   let ex, ficha;
-  for (const f of FICHAS) { const t = TREINOS[f]; if (!t) continue; const e = exerciciosDe(t).find((x) => x.id === exId); if (e) { ex = e; ficha = f; } }
-  if (!ex) return `<div class="vazio">Exercício não encontrado.</div>`;
+  for (const f of FICHAS) { const t = fichaDe(f); if (!t) continue; const e = exerciciosDe(t).find((x) => x.id === exId); if (e) { ex = e; ficha = f; } }
+  if (!ex) {
+    // Exercício que já saiu da ficha: usa os dados guardados nas sessões
+    const s = sessoesOrdenadas().find((x) => x.series[exId]);
+    if (!s) return `<div class="vazio">Exercício não encontrado.</div>`;
+    ex = exInfo(exId, s); ficha = s.treino;
+  }
   const pts = pontosExercicio(ex);
   const unid = SEM_CARGA(ex) ? 'peso corporal' : ex.carga === 'elastico' ? 'elástico' : `carga em ${UNIDADE[ex.carga]}`;
   let h = `<a href="#/progresso/${ficha}" class="small">‹ Progresso ${ficha}</a><h1 style="font-size:22px">${esc(ex.nome)}</h1>
@@ -572,8 +619,49 @@ function telaExercicio(exId) {
 }
 
 // ---------- Tela: Ajustes ----------
+// ---------- Perfil (dados pessoais) ----------
+function idadeEm(nascimento, data = isoDia()) {
+  if (!nascimento) return null;
+  const [y, m, d] = nascimento.split('-').map(Number);
+  const [Y, M, D] = data.split('-').map(Number);
+  return Y - y - (M < m || (M === m && D < d) ? 1 : 0);
+}
+// Peso vigente numa data: o último registrado até aquele dia (ou o primeiro, para datas anteriores)
+function pesoEm(data = isoDia()) {
+  const pesos = [...(db.perfil.pesos || [])].sort((a, b) => a.data.localeCompare(b.data));
+  if (!pesos.length) return null;
+  let p = pesos[0].kg;
+  for (const x of pesos) if (x.data <= data) p = x.kg;
+  return p;
+}
+function imc() {
+  const p = pesoEm(), h = num(db.perfil.altura);
+  return p && h ? p / (h / 100) ** 2 : null;
+}
+
+function cartaoPerfil() {
+  const p = db.perfil;
+  const pesos = [...(p.pesos || [])].sort((a, b) => b.data.localeCompare(a.data));
+  const idade = idadeEm(p.nascimento);
+  const i = imc();
+  return `<div class="card"><h2>Meus dados</h2>
+    <p class="muted small">Usados nos relatórios (estimativa de calorias e IMC). Ficam só neste celular.</p>
+    <div class="form">
+      <label>Data de nascimento<input type="date" class="input-texto" data-perfil="nascimento" value="${esc(p.nascimento)}"></label>
+      <label>Altura (cm)<input inputmode="numeric" class="input-texto" data-perfil="altura" value="${esc(p.altura)}" placeholder="ex.: 178"></label>
+      <label>Peso de hoje (kg)<div class="linha"><input inputmode="decimal" class="input-texto cresce" id="novo-peso" placeholder="${pesos[0] ? fmtKg(pesos[0].kg) : 'ex.: 91'}">
+        <button class="btn-mini" data-acao="registrar-peso">Registrar</button></div></label>
+    </div>
+    <p class="small" style="margin-top:10px">${idade !== null ? `${idade} anos` : 'Idade: –'} · ${pesoEm() ? `${fmtKg(pesoEm())} kg` : 'Peso: –'}${i ? ` · IMC ${i.toFixed(1).replace('.', ',')}` : ''}</p>
+    ${pesos.length ? `<details style="margin-top:6px"><summary class="small muted">Histórico de peso (${pesos.length}) ▾</summary>
+      ${pesos.map((x) => `<div class="linha entre small" style="padding:6px 0;border-top:1px solid var(--line)"><span>${fmtData(x.data)}/${x.data.slice(0, 4)}</span>
+        <span>${fmtKg(x.kg)} kg <button class="btn-mini" data-acao="apagar-peso" data-data="${x.data}" aria-label="Apagar">✕</button></span></div>`).join('')}</details>` : ''}
+  </div>`;
+}
+
 function telaAjustes() {
   return `<h1>Ajustes</h1>
+    ${cartaoPerfil()}
     <div class="card"><div class="linha entre"><div class="cresce"><b>Manter tela ligada</b><p class="muted small">Durante o treino a tela não apaga sozinha.</p></div>
       <button class="btn-mini" data-acao="tela">${db.config.telaLigada ? 'Ligado' : 'Desligado'}</button></div></div>
     <div class="card"><h2>Backup</h2>
@@ -608,7 +696,10 @@ function importar(input) {
     const dados = JSON.parse(txt);
     if (!Array.isArray(dados.sessoes)) throw new Error('formato');
     if (!confirm(`Substituir os dados atuais por este backup (${dados.sessoes.length} treinos)?`)) return;
-    db = Object.assign(novoDb(), { sessoes: dados.sessoes, ativa: dados.ativa || null, config: { ...novoDb().config, ...dados.config } });
+    db = Object.assign(novoDb(), {
+      sessoes: dados.sessoes, ativa: dados.ativa || null, config: { ...novoDb().config, ...dados.config },
+      fichas: dados.fichas || {}, perfil: { ...novoDb().perfil, ...dados.perfil },
+    });
     salvar(); toast('Backup importado'); render();
   }).catch(() => toast('Arquivo de backup inválido'));
   input.value = '';
@@ -643,7 +734,7 @@ document.addEventListener('click', (e) => {
     const linha = el.closest('.serie');
     const exId = linha.dataset.ex, i = +linha.dataset.i;
     const s = a.series[exId][i];
-    const blocos = TREINOS[a.treino].blocos;
+    const blocos = fichaDe(a.treino).blocos;
     const bloco = blocos.find((b) => b.exercicios.some((x) => x.id === exId));
     const ex = bloco.exercicios.find((x) => x.id === exId);
     if (!s.ok) {
@@ -703,6 +794,16 @@ document.addEventListener('click', (e) => {
       db.sessoes = db.sessoes.filter((s) => s.id !== el.dataset.id); salvar(); location.hash = '#/historico';
     }
   }
+  else if (acao === 'registrar-peso') {
+    const kg = num($('#novo-peso').value);
+    if (kg === null || kg < 30 || kg > 300) return toast('Informe um peso válido');
+    const hoje = isoDia();
+    db.perfil.pesos = (db.perfil.pesos || []).filter((x) => x.data !== hoje).concat({ data: hoje, kg });
+    salvar(); render(); toast('Peso registrado');
+  }
+  else if (acao === 'apagar-peso') {
+    db.perfil.pesos = db.perfil.pesos.filter((x) => x.data !== el.dataset.data); salvar(); render();
+  }
   else if (acao === 'tela') { db.config.telaLigada = !db.config.telaLigada; salvar(); render(); }
   else if (acao === 'exportar') exportar();
   else if (acao === 'apagar-tudo') {
@@ -731,6 +832,10 @@ document.addEventListener('input', (e) => {
 
 document.addEventListener('change', (e) => {
   if (e.target.dataset.acao === 'importar') importar(e.target);
+  if (e.target.dataset.perfil) {
+    db.perfil[e.target.dataset.perfil] = e.target.value.trim();
+    salvar(); render();
+  }
   if (e.target.dataset.reg === 'data') {
     const v = e.target.value;
     registro.data = v && v <= isoDia() ? v : isoDia();

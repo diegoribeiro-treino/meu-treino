@@ -139,6 +139,44 @@ body { padding-top: 0; }
 .opcoes button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
 textarea, .input-texto { width: 100%; font: inherit; color: var(--text); background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-top: 8px; }
 
+/* Formulários */
+.form { display: grid; gap: 12px; margin-top: 10px; }
+.form label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.form .input-texto, .form select, .form textarea { margin-top: 0; font-size: 16px; }
+.form select { width: 100%; font: inherit; font-size: 16px; color: var(--text); background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.form .dupla { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.form .check-linha { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 15px; }
+.form .check-linha input { width: 22px; height: 22px; accent-color: var(--accent); }
+
+/* Editor de fichas */
+.ed-bloco { border-left: 3px solid var(--accent); }
+.ed-acoes { display: flex; gap: 4px; flex: none; }
+.ed-acoes button { width: 32px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--card2); color: var(--text); font-size: 15px; cursor: pointer; padding: 0; }
+.ed-acoes button:disabled { opacity: .3; }
+.ed-acoes button.perigo { color: var(--danger); }
+.ed-ex { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.ed-ex .num-ex { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--card2); display: grid; place-items: center; font-size: 12px; font-weight: 700; color: var(--muted); }
+.btn-add { display: block; width: 100%; margin-top: 10px; padding: 10px; border-radius: 10px; border: 1px dashed var(--line); background: transparent; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; text-align: center; text-decoration: none; }
+.thumb-mini { width: 100%; max-width: 220px; border-radius: 8px; display: block; margin-top: 6px; }
+.barra-fixa { position: sticky; bottom: calc(var(--nav-h) + var(--safe-b)); background: var(--bg); padding: 8px 0 4px; display: flex; gap: 8px; z-index: 6; }
+.barra-fixa .btn { margin-top: 0; }
+
+/* Relatórios */
+.kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.kpi b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.kpi span { font-size: 12px; color: var(--muted); }
+.hbar { display: grid; grid-template-columns: 92px 1fr 44px; gap: 8px; align-items: center; font-size: 13px; padding: 4px 0; }
+.hbar .trilho { height: 10px; background: var(--card2); border-radius: 5px; overflow: hidden; }
+.hbar .trilho i { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
+.hbar .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.colunas { display: flex; align-items: flex-end; gap: 6px; height: 110px; margin-top: 10px; }
+.colunas .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; }
+.colunas .col i { width: 100%; background: var(--accent); border-radius: 5px 5px 0 0; min-height: 2px; }
+.colunas .col i.zero { background: var(--card2); }
+.colunas .col span { font-size: 10px; color: var(--muted); }
+.colunas .col b { font-size: 11px; }
+
 /* Listas */
 .item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); color: var(--text); text-decoration: none; }
 .item:first-child { border-top: 0; }
@@ -163,7 +201,7 @@ svg.grafico { display: block; width: 100%; height: auto; margin-top: 8px; }
   height: calc(var(--nav-h) + var(--safe-b)); padding-bottom: var(--safe-b);
   background: rgba(15, 17, 21, .94); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid var(--line);
 }
-.nav a { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 11px; color: var(--muted); text-decoration: none; }
+.nav a { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 10px; color: var(--muted); text-decoration: none; }
 .nav a .ico { font-size: 20px; line-height: 1; }
 .nav a.sel { color: var(--accent); }
 
