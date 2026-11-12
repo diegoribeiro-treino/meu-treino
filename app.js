@@ -103,11 +103,12 @@ function contarSeries(t, series) {
 }
 
 // ---------- Sessão ativa ----------
-function iniciarTreino(fichaId) {
+// dataManual (YYYY-MM-DD): registro de um treino feito fora do app, sem cronômetro nem descanso
+function iniciarTreino(fichaId, dataManual = null) {
   const t = TREINOS[fichaId];
   if (!t) return toast(`Ficha ${fichaId} ainda não cadastrada`);
   if (db.ativa) {
-    if (db.ativa.treino === fichaId) return (location.hash = '#/treino');
+    if (db.ativa.treino === fichaId && (db.ativa.dataManual || null) === dataManual) return (location.hash = '#/treino');
     if (!confirm(`Há um treino ${db.ativa.treino} em andamento. Descartar e iniciar o ${fichaId}?`)) return;
   }
   const series = {}, extras = {};
@@ -122,13 +123,14 @@ function iniciarTreino(fichaId) {
   db.ativa = {
     id: uid(), treino: fichaId, inicio: Date.now(), series, extras,
     checks: { cardioIni: false, prep: t.preparacao.map(() => false), core: (t.core || []).map(() => false), mob: t.mobilidade.map(() => false) },
-    descanso: null,
+    descanso: null, dataManual,
   };
   salvar();
   location.hash = '#/treino';
 }
 
 function iniciarDescanso(bloco, rotulo) {
+  if (db.ativa.dataManual) return;
   db.ativa.descanso = { inicio: Date.now(), min: bloco.descanso[0], max: bloco.descanso[1], rotulo };
   avisos.min = avisos.max = false;
   salvar();
@@ -175,7 +177,7 @@ const avisos = { min: false, max: false };
 function tick() {
   const a = db.ativa;
   const cron = $('#cron');
-  if (cron && a) cron.textContent = fmtCron(Date.now() - a.inicio);
+  if (cron && a) cron.textContent = a.dataManual ? `Registro de ${fmtData(a.dataManual)}` : fmtCron(Date.now() - a.inicio);
 
   const barra = $('#descanso');
   const d = a && a.descanso;
@@ -208,7 +210,7 @@ function rotaAtual() {
   return { pag, arg: arg && decodeURIComponent(arg) };
 }
 
-const telas = { hoje: telaHoje, treino: telaTreino, finalizar: telaFinalizar, historico: telaHistorico, sessao: telaSessao, progresso: telaProgresso, exercicio: telaExercicio, ajustes: telaAjustes };
+const telas = { hoje: telaHoje, registrar: telaRegistrar, treino: telaTreino, finalizar: telaFinalizar, historico: telaHistorico, sessao: telaSessao, progresso: telaProgresso, exercicio: telaExercicio, ajustes: telaAjustes };
 
 let ultimaPag = null;
 function render() {
@@ -219,7 +221,7 @@ function render() {
   app.innerHTML = fn(arg);
   window.scrollTo(0, mesmaPag ? y : 0);
   ultimaPag = pag;
-  const aba = { treino: 'hoje', finalizar: 'hoje', sessao: 'historico', exercicio: 'progresso' }[pag] || pag;
+  const aba = { treino: 'hoje', finalizar: 'hoje', registrar: 'hoje', sessao: 'historico', exercicio: 'progresso' }[pag] || pag;
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('sel', a.dataset.tab === aba));
   tick();
   atualizarTelaLigada();
@@ -263,7 +265,8 @@ function telaHoje() {
         <b>${f}</b><span>${TIPO_FICHA[f]}</span><span>${ult ? 'Último ' + fmtData(ult.data) : 'Nunca feito'}</span>
         ${f === sugestao ? '<span class="prox">próximo</span>' : ''}</button>`;
     }
-    h += `</div><p class="muted small" style="margin-top:8px">Toque numa ficha para escolher. Qualquer dia pode ser de treino ou de descanso, inclusive o domingo.</p>`;
+    h += `</div><p class="muted small" style="margin-top:8px">Toque numa ficha para escolher. Qualquer dia pode ser de treino ou de descanso, inclusive o domingo.</p>
+      <a class="btn sec" href="#/registrar">+ Registrar treino feito fora do app</a>`;
   }
 
   // Semana atual (segunda a domingo): mostra o que foi feito em cada dia
@@ -277,6 +280,24 @@ function telaHoje() {
   }
   const naSemana = db.sessoes.filter((s) => s.data >= isoDia(seg)).length;
   h += `</div><p class="muted small" style="margin-top:8px">${naSemana} treino${naSemana === 1 ? '' : 's'} nesta semana</p>`;
+  return h;
+}
+
+// ---------- Tela: Registrar treino feito fora do app ----------
+const registro = { data: null, ficha: null };
+function telaRegistrar() {
+  const hoje = isoDia();
+  registro.data ??= hoje;
+  let h = `<a href="#/hoje" class="small">‹ Hoje</a><h1>Registrar treino</h1>
+    <p class="muted small">Para um treino feito sem o app. Ele entra no histórico e na sequência de sugestões. Anote só o que lembrar.</p>
+    <div class="card"><h2>Data do treino</h2>
+      <input type="date" class="input-texto" data-reg="data" value="${registro.data}" max="${hoje}"></div>
+    <div class="card"><h2>Qual ficha?</h2><div class="fichas" style="margin-top:8px">`;
+  for (const f of FICHAS) {
+    h += `<button class="ficha ${f === registro.ficha ? 'sel' : ''}" data-acao="registro-ficha" data-ficha="${f}"><b>${f}</b><span>${TIPO_FICHA[f]}</span></button>`;
+  }
+  h += `</div></div>
+    <button class="btn" data-acao="registro-abrir" ${registro.ficha ? '' : 'disabled style="opacity:.5"'}>${registro.ficha ? `Anotar ${registro.ficha} de ${fmtData(registro.data)}` : 'Escolha a ficha'}</button>`;
   return h;
 }
 
@@ -317,6 +338,9 @@ function telaTreino() {
     <div class="small muted" style="margin-top:2px"><span id="contador">${feitas}/${total} séries</span></div>
     <div class="progresso-barra"><i id="barra" style="width:${(feitas / total) * 100}%"></i></div></div>`;
 
+  if (a.dataManual) {
+    h += `<div class="card destaque small">Registro de <b>${fmtDataLonga(a.dataManual)}</b>: anote cargas e repetições que lembrar e marque ✓. Séries não marcadas não contam. Sem cronômetro nem descanso.</div>`;
+  }
   h += `<div class="card"><details><summary class="small muted">Como executar ▾</summary><p class="small muted">${esc(t.instrucoes)}</p></details></div>`;
 
   h += `<div class="card"><h2>${esc(t.cardioInicial.titulo)}</h2>${checkItem('cardioIni', 0, t.cardioInicial.texto, a.checks.cardioIni)}</div>`;
@@ -385,12 +409,12 @@ function telaFinalizar() {
   const t = TREINOS[a.treino];
   a.fim ??= {};
   const f = a.fim;
-  f.duracao ??= Math.round((Date.now() - a.inicio) / 60000);
+  f.duracao ??= a.dataManual ? '' : Math.round((Date.now() - a.inicio) / 60000);
   const { total, feitas } = contarSeries(t, a.series);
   return `<h1>Finalizar ${esc(a.treino)}</h1>
-    <p class="muted">${feitas} de ${total} séries registradas</p>
-    <div class="card"><h2>Tempo total</h2>
-      <label class="campo"><input inputmode="numeric" data-fim="duracao" value="${f.duracao}"><em>min</em></label></div>
+    <p class="muted">${a.dataManual ? `Registro de ${fmtDataLonga(a.dataManual)} · ` : ''}${feitas} de ${total} séries registradas</p>
+    <div class="card"><h2>Tempo total</h2>${a.dataManual ? '<p class="muted small">Opcional: deixe em branco se não lembrar.</p>' : ''}
+      <label class="campo"><input inputmode="numeric" data-fim="duracao" value="${f.duracao}" placeholder="–"><em>min</em></label></div>
     <div class="card"><h2>${esc(t.cardioFinal.titulo)}</h2>
       <div class="opcoes">
         <button class="${f.cardioFinal === 'feito' ? 'sel' : ''}" data-acao="fim-opcao" data-campo="cardioFinal" data-valor="feito">15 min feitos</button>
@@ -407,9 +431,13 @@ function telaFinalizar() {
 function salvarSessao() {
   const a = db.ativa;
   const f = a.fim || {};
+  // Registro de outro dia entra ao meio-dia daquela data, para ficar na ordem certa do histórico
+  const retroativo = a.dataManual && a.dataManual !== isoDia();
+  const inicio = retroativo ? dataDeIso(a.dataManual).setHours(12) : a.inicio;
   const sessao = {
-    id: a.id, treino: a.treino, data: isoDia(new Date(a.inicio)), inicio: a.inicio, termino: Date.now(),
-    duracaoMin: num(f.duracao) ?? Math.round((Date.now() - a.inicio) / 60000),
+    id: a.id, treino: a.treino, data: a.dataManual || isoDia(new Date(a.inicio)), inicio, termino: retroativo ? inicio : Date.now(),
+    duracaoMin: num(f.duracao) ?? (a.dataManual ? null : Math.round((Date.now() - a.inicio) / 60000)),
+    registroManual: !!a.dataManual,
     series: a.series, checks: a.checks, extras: a.extras || {},
     cardioFinal: f.cardioFinal || null, esforco: f.esforco ?? null, notas: (f.notas || '').trim(),
   };
@@ -424,14 +452,17 @@ function salvarSessao() {
 // ---------- Tela: Histórico ----------
 function telaHistorico() {
   const lista = sessoesOrdenadas();
-  if (!lista.length) return `<h1>Histórico</h1><div class="vazio">Nenhum treino registrado ainda.<br>Os treinos finalizados aparecem aqui.</div>`;
-  let h = `<h1>Histórico</h1><p class="muted">${lista.length} treino${lista.length > 1 ? 's' : ''} registrado${lista.length > 1 ? 's' : ''}</p><div class="card">`;
+  const botao = `<a class="btn sec" href="#/registrar">+ Registrar treino feito fora do app</a>`;
+  if (!lista.length) return `<h1>Histórico</h1><div class="vazio">Nenhum treino registrado ainda.<br>Os treinos finalizados aparecem aqui.</div>${botao}`;
+  let h = `<h1>Histórico</h1><p class="muted">${lista.length} treino${lista.length > 1 ? 's' : ''} registrado${lista.length > 1 ? 's' : ''}</p>${botao}<div class="card">`;
   for (const s of lista) {
     const t = TREINOS[s.treino];
     const c = t ? contarSeries(t, s.series) : null;
+    const info = [s.duracaoMin != null ? `${s.duracaoMin} min` : null, c ? `${c.feitas}/${c.total} séries` : null,
+      s.esforco != null ? `esforço ${s.esforco}/10` : null, s.registroManual ? 'registrado depois' : null].filter(Boolean).join(' · ');
     h += `<a class="item" href="#/sessao/${s.id}"><span class="ficha-badge">${esc(s.treino)}</span>
       <div class="cresce"><b>${fmtDataLonga(s.data)}</b>
-      <div class="muted small">${s.duracaoMin} min${c ? ` · ${c.feitas}/${c.total} séries` : ''}${s.esforco !== null ? ` · esforço ${s.esforco}/10` : ''}</div></div>
+      <div class="muted small">${info}</div></div>
       <span class="seta">›</span></a>`;
   }
   return h + `</div>`;
@@ -443,7 +474,7 @@ function telaSessao(id) {
   const t = TREINOS[s.treino];
   let h = `<a href="#/historico" class="small">‹ Histórico</a><h1>${esc(s.treino)} · ${fmtData(s.data)}</h1>
     <p class="muted">${fmtDataLonga(s.data)}</p>
-    <div class="card"><div class="linha entre"><span>Tempo total</span><b>${s.duracaoMin} min</b></div>
+    <div class="card"><div class="linha entre"><span>Tempo total</span><b>${s.duracaoMin != null ? s.duracaoMin + ' min' : '–'}</b></div>
       <div class="linha entre"><span>Cardio final</span><b>${s.cardioFinal === 'feito' ? '15 min' : s.cardioFinal === 'dispensado' ? 'Dispensado' : '–'}</b></div>
       <div class="linha entre"><span>Esforço</span><b>${s.esforco ?? '–'}/10</b></div>
       ${s.notas ? `<p class="muted small" style="margin-top:8px">${esc(s.notas)}</p>` : ''}</div>`;
@@ -593,6 +624,12 @@ document.addEventListener('click', (e) => {
 
   if (acao === 'iniciar') iniciarTreino(el.dataset.ficha);
   else if (acao === 'escolher') { fichaEscolhida = el.dataset.ficha; render(); }
+  else if (acao === 'registro-ficha') { registro.ficha = el.dataset.ficha; render(); }
+  else if (acao === 'registro-abrir' && registro.ficha) {
+    const { ficha, data } = registro;
+    registro.ficha = null; registro.data = null;
+    iniciarTreino(ficha, data);
+  }
   else if (acao === 'video') abrirVideo(el);
 
   else if (acao === 'check') {
@@ -694,6 +731,11 @@ document.addEventListener('input', (e) => {
 
 document.addEventListener('change', (e) => {
   if (e.target.dataset.acao === 'importar') importar(e.target);
+  if (e.target.dataset.reg === 'data') {
+    const v = e.target.value;
+    registro.data = v && v <= isoDia() ? v : isoDia();
+    render();
+  }
 });
 
 // Enter no campo de carga pula para repetições
