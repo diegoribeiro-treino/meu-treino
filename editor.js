@@ -1,8 +1,8 @@
 'use strict';
 
 // Aba "Treinos": consulta e edição das fichas dentro do app.
-// A primeira edição de uma ficha copia a versão de treinos.js para db.fichas; dali em diante
-// o app usa a cópia (ver fichaDe em app.js). "Restaurar original" apaga a cópia.
+// As fichas pertencem ao programa ativo (programas.js). No programa padrão (Treino AB), a primeira
+// edição de uma ficha copia a versão de treinos.js para o programa; "Restaurar original" apaga a cópia.
 
 const CARGAS = [
   ['total', 'Carga total (kg): máquina, barra ou polia'],
@@ -15,11 +15,6 @@ const CARGAS = [
 const ROTULO_CARGA = Object.fromEntries(CARGAS.map(([k, v]) => [k, v.split(':')[0].split(' (')[0]]));
 const LADOS = [['', 'Bilateral (normal)'], ['por lado', 'Por lado'], ['por perna', 'Por perna'], ['passos por direção', 'Passos por direção']];
 
-function editavel(f) {
-  db.fichas ??= {};
-  return (db.fichas[f] ??= structuredClone(TREINOS[f]));
-}
-const foiEditada = (f) => !!(db.fichas && db.fichas[f]);
 
 // Aceita link do YouTube (watch, youtu.be, shorts, embed) ou o código de 11 caracteres
 function idVideo(txt) {
@@ -37,7 +32,8 @@ function novoIdExercicio(f, nome) {
 
 function gruposConhecidos() {
   const g = new Set();
-  for (const f of FICHAS) for (const ex of exerciciosDe(fichaDe(f))) if (ex.grupo) g.add(ex.grupo);
+  for (const c of CATALOGO) g.add(c.grupo);
+  for (const f of fichasIds()) for (const ex of exerciciosDe(fichaDe(f))) if (ex.grupo) g.add(ex.grupo);
   return [...g].sort();
 }
 
@@ -49,18 +45,37 @@ const opcoes = (lista, sel) => lista.map(([v, t]) => `<option value="${esc(v)}" 
 
 // ---------- Lista de fichas ----------
 function telaTreinos() {
-  let h = `<h1>Treinos</h1><p class="muted small">Consulte cada ficha ou toque em Editar para trocar exercícios, ajustar séries, descansos e a ordem.</p>
-    <a class="btn sec" href="#/catalogo">Catálogo de exercícios (${CATALOGO.length})</a>`;
-  for (const f of FICHAS) {
+  const p = programaAtivo();
+  let h = `<h1>Treinos</h1>`;
+  if (!p) {
+    h += `<div class="card destaque"><h2>Você ainda não tem um programa</h2>
+      <p class="muted small">Crie com o assistente, monte pelo catálogo ou importe uma ficha pronta.</p>
+      <a class="btn" href="#/criar">Criar meu treino</a></div>`;
+  } else {
+    const prog = progressoPrograma(p);
+    h += `<a class="card destaque" href="#/programa/${p.id}" style="display:block;color:inherit;text-decoration:none">
+      <div class="linha entre"><span class="tag ac">Programa ativo</span><span class="small muted">Configurar ›</span></div>
+      <h2 style="margin-top:8px">${esc(p.nome)}</h2><p class="muted small">${esc(prog.texto)}</p>
+      ${prog.fracao !== null ? `<div class="progresso-barra"><i style="width:${prog.fracao * 100}%"></i></div>` : ''}</a>
+      <p class="muted small">Toque numa ficha para consultar ou editar exercícios, séries, descansos e a ordem.</p>`;
+  }
+  for (const f of fichasIds()) {
     const t = fichaDe(f);
+    if (!t) continue;
     const c = contarSeries(t, {});
-    h += `<a class="card" href="#/ficha/${f}" style="display:block;color:inherit;text-decoration:none">
-      <div class="linha entre"><span class="tag ac">${f} · ${esc(TIPO_FICHA[f])}</span>${foiEditada(f) ? '<span class="tag">editada</span>' : ''}</div>
+    h += `<a class="card" href="#/ficha/${encodeURIComponent(f)}" style="display:block;color:inherit;text-decoration:none">
+      <div class="linha entre"><span class="tag ac">${esc(f)}${tipoFicha(f) ? ` · ${esc(tipoFicha(f))}` : ''}</span>${foiEditada(f) ? '<span class="tag">editada</span>' : ''}</div>
       <h2 style="margin-top:8px">${esc(t.titulo)}</h2>
       <p class="muted small">${esc(t.resumo)}</p>
       <div class="linha entre small"><span class="muted">${t.blocos.length} blocos · ${exerciciosDe(t).length} exercícios · ${c.total} séries</span><span class="seta">›</span></div></a>`;
   }
-  return h;
+  const outros = (db.programas || []).filter((x) => x.id !== p?.id);
+  if (outros.length) {
+    h += `<h3>Outros programas</h3><div class="card">${outros.map((x) => `<a class="item" href="#/programa/${x.id}">
+      <div class="cresce"><b>${esc(x.nome)}</b><div class="muted small">${x.ordem.length} fichas · ${esc(progressoPrograma(x).texto)}</div></div><span class="seta">›</span></a>`).join('')}</div>`;
+  }
+  return h + `<a class="btn" href="#/criar">+ Novo programa</a>
+    <a class="btn sec" href="#/catalogo">Catálogo de exercícios (${CATALOGO.length})</a>`;
 }
 
 // ---------- Ficha: consulta e modo edição ----------
@@ -74,7 +89,7 @@ function telaFicha(f, args) {
   if (!editando) {
     h += `<div class="linha" style="gap:8px"><a class="btn sec" href="#/ficha/${f}/editar">✏️ Editar ficha</a>
       <button class="btn" data-acao="iniciar" data-ficha="${f}">Iniciar ${f}</button></div>`;
-    h += `<div class="card"><h2>${esc(t.cardioInicial.titulo)}</h2><p class="small muted">${esc(t.cardioInicial.texto)}</p></div>
+    h += `${t.cardioInicial ? `<div class="card"><h2>${esc(t.cardioInicial.titulo)}</h2><p class="small muted">${esc(t.cardioInicial.texto)}</p></div>` : ''}
       ${cartaoSecaoComp(t.tituloPreparacao || 'Preparação', 'prep', t.preparacao, null, t.avisos || [])}`;
     let n = 0;
     for (const b of t.blocos) {
@@ -91,7 +106,7 @@ function telaFicha(f, args) {
     }
     h += cartaoSecaoComp('Core', 'core', t.core || [], null);
     h += `${cartaoSecaoComp(t.tituloMobilidade || 'Mobilidade', 'mob', t.mobilidade, null)}
-      <div class="card"><h2>${esc(t.cardioFinal.titulo)}</h2><p class="small muted">${esc(t.cardioFinal.texto)}</p></div>
+      ${t.cardioFinal ? `<div class="card"><h2>${esc(t.cardioFinal.titulo)}</h2><p class="small muted">${esc(t.cardioFinal.texto)}</p></div>` : ''}
       <div class="card"><h2>Carga e progressão</h2><p class="small muted">${esc(t.progressao)}</p></div>`;
     return h;
   }
@@ -276,13 +291,13 @@ function telaEditarTextos(f) {
     <p class="muted small">Os exercícios de preparação, core e mobilidade são editados na própria ficha. Aqui ficam os textos.</p>
     <div class="card form">
       <label>Como executar<textarea id="x-instrucoes" rows="3">${esc(t.instrucoes)}</textarea></label>
-      <label>Cardio inicial: título<input class="input-texto" id="x-ci-titulo" value="${esc(t.cardioInicial.titulo)}"></label>
-      <label>Cardio inicial: descrição<textarea id="x-ci-texto" rows="2">${esc(t.cardioInicial.texto)}</textarea></label>
+      <label>Cardio inicial: título<input class="input-texto" id="x-ci-titulo" value="${esc(t.cardioInicial?.titulo || '')}" placeholder="Deixe vazio para não ter cardio inicial"></label>
+      <label>Cardio inicial: descrição<textarea id="x-ci-texto" rows="2">${esc(t.cardioInicial?.texto || '')}</textarea></label>
       <label>Preparação: título<input class="input-texto" id="x-prep-titulo" value="${esc(t.tituloPreparacao || 'Preparação')}"></label>
       <label>Avisos da preparação (um por linha)<textarea id="x-avisos" rows="4">${linhas(t.avisos)}</textarea></label>
       <label>Mobilidade: título<input class="input-texto" id="x-mob-titulo" value="${esc(t.tituloMobilidade || 'Mobilidade')}"></label>
-      <label>Cardio final: título<input class="input-texto" id="x-cf-titulo" value="${esc(t.cardioFinal.titulo)}"></label>
-      <label>Cardio final: descrição<textarea id="x-cf-texto" rows="2">${esc(t.cardioFinal.texto)}</textarea></label>
+      <label>Cardio final: título<input class="input-texto" id="x-cf-titulo" value="${esc(t.cardioFinal?.titulo || '')}" placeholder="Deixe vazio para não ter cardio final"></label>
+      <label>Cardio final: descrição<textarea id="x-cf-texto" rows="2">${esc(t.cardioFinal?.texto || '')}</textarea></label>
       <label>Carga e progressão<textarea id="x-prog" rows="3">${esc(t.progressao)}</textarea></label>
     </div>
     <div class="barra-fixa">
@@ -297,11 +312,12 @@ function salvarTextos(el) {
   const lista = (id) => val(id).split('\n').map((s) => s.trim()).filter(Boolean);
   const t = editavel(f);
   t.instrucoes = val('x-instrucoes');
-  t.cardioInicial = { titulo: val('x-ci-titulo'), texto: val('x-ci-texto') };
+  const minutos = (txt) => parseInt((txt.match(/(\d+)\s*min/) || [])[1], 10) || 15;
+  t.cardioInicial = val('x-ci-titulo') ? { titulo: val('x-ci-titulo'), texto: val('x-ci-texto'), min: minutos(val('x-ci-titulo')) } : null;
   t.tituloPreparacao = val('x-prep-titulo');
   t.avisos = lista('x-avisos');
   t.tituloMobilidade = val('x-mob-titulo');
-  t.cardioFinal = { titulo: val('x-cf-titulo'), texto: val('x-cf-texto') };
+  t.cardioFinal = val('x-cf-titulo') ? { titulo: val('x-cf-titulo'), texto: val('x-cf-texto'), min: minutos(val('x-cf-titulo')) } : null;
   t.progressao = val('x-prog');
   salvar(); toast('Textos salvos');
   location.hash = `#/ficha/${f}/editar`;
@@ -396,7 +412,7 @@ document.addEventListener('click', (e) => {
   }
   else if (acao === 'ed-restaurar') {
     if (!confirm(`Voltar a ficha ${f} para a versão original? Todas as alterações feitas nela serão desfeitas. O histórico de treinos não é afetado.`)) return;
-    delete db.fichas[f]; salvar(); toast('Ficha restaurada'); location.hash = `#/ficha/${f}`;
+    delete programaAtivo().fichas[f]; salvar(); toast('Ficha restaurada'); location.hash = `#/ficha/${f}`;
   }
 });
 

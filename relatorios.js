@@ -36,8 +36,10 @@ function calcSessao(s) {
     const fator = (ex.carga === 'halter' ? 2 : 1) * (ex.lado === 'por lado' || ex.lado === 'por perna' ? 2 : 1);
     for (const x of feitas) volume += (num(x.kg) || 0) * (num(x.reps) || 0) * fator;
   }
-  const ini = s.checks && s.checks.cardioIni ? CARDIO_INI : null;
-  const fim = s.cardioFinal === 'feito' ? CARDIO_FIM : null;
+  // Minutos de cardio gravados no treino (padrão: 15 min, como nas fichas AB); 1/3 leve e 2/3 moderado
+  const cardio = (min) => ({ min, metMin: (min / 3) * MET.cardioLeve + ((2 * min) / 3) * MET.cardioModerado });
+  const ini = s.checks && s.checks.cardioIni ? (s.cardioIniMin ? cardio(s.cardioIniMin) : CARDIO_INI) : null;
+  const fim = s.cardioFinal === 'feito' ? (s.cardioFimMin ? cardio(s.cardioFimMin) : CARDIO_FIM) : null;
   const minCardio = (ini ? ini.min : 0) + (fim ? fim.min : 0);
   const estimado = s.duracaoMin == null;
   const min = estimado ? Math.round(series * MIN_POR_SERIE + minCardio) : s.duracaoMin;
@@ -76,7 +78,10 @@ function telaRelatorios() {
   const comKcal = calcs.filter((x) => x.c.kcal != null);
   const kcalTot = comKcal.reduce((a, x) => a + x.c.kcal, 0);
   // Séries previstas guardadas no treino; para treinos antigos, usa a ficha atual (nunca menos que as feitas)
-  const planejadas = soma((x) => x.s.planejadas ?? Math.max(contarSeries(fichaDe(x.s.treino), {}).total, x.c.series));
+  const planejadas = soma((x) => {
+    const t = fichaDaSessao(x.s);
+    return x.s.planejadas ?? Math.max(t ? contarSeries(t, {}).total : 0, x.c.series);
+  });
   const seriesTot = soma((x) => x.c.series);
   const esforcos = lista.filter((s) => s.esforco != null).map((s) => s.esforco);
   const kpi = (valor, rotulo) => `<div class="kpi"><b>${valor}</b><span>${rotulo}</span></div>`;
@@ -110,7 +115,10 @@ function telaRelatorios() {
   if (!n) return h + `<div class="vazio">Nenhum treino neste período.</div>${rodapeRel()}`;
 
   // 3. Treinos por ficha
-  h += `<h3>Treinos por ficha</h3><div class="card">${barrasH(FICHAS.map((f) => ({ rotulo: f, v: lista.filter((s) => s.treino === f).length })))}
+  const porFicha = {};
+  for (const s of lista) { const chave = s.programa === db.programaAtivo ? s.treino : `${s.treino} (anterior)`; porFicha[chave] = (porFicha[chave] || 0) + 1; }
+  const ordemFichas = [...fichasIds(), ...Object.keys(porFicha).filter((k) => !fichasIds().includes(k))];
+  h += `<h3>Treinos por ficha</h3><div class="card">${barrasH(ordemFichas.map((f) => ({ rotulo: f, v: porFicha[f] || 0 })))}
     <p class="muted small" style="margin-top:6px">Ajuda a manter o equilíbrio entre superiores (A) e inferiores (B).</p></div>`;
 
   // 4. Séries por grupo muscular
@@ -162,7 +170,7 @@ function telaRelatorios() {
 
   // 7. Progressão: prontos para subir e estagnados (últimos 3 registros com a mesma carga)
   const subir = [], parados = [];
-  for (const f of FICHAS) for (const ex of exerciciosDe(fichaDe(f))) {
+  for (const f of fichasIds()) for (const ex of exerciciosDe(fichaDe(f))) {
     const pts = pontosExercicio(ex);
     if (!pts.length) continue;
     const ult = pts[pts.length - 1];

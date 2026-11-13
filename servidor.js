@@ -80,9 +80,13 @@ function juntar(destino, origem) {
   for (const s of origem.sessoes || []) {
     if (!destino.sessoes.some((x) => x.id === s.id)) { destino.sessoes.push(s); mudou = true; }
   }
-  for (const f of Object.keys(origem.fichas || {})) {
-    if (!destino.fichas[f]) { destino.fichas[f] = origem.fichas[f]; mudou = true; }
+  migrarProgramas(origem);
+  for (const p of origem.programas || []) {
+    const atual = destino.programas.find((x) => x.id === p.id);
+    if (!atual) { destino.programas.push(p); mudou = true; continue; }
+    for (const f of Object.keys(p.fichas)) if (!atual.fichas[f]) { atual.fichas[f] = p.fichas[f]; mudou = true; }
   }
+  if (!destino.programaAtivo && destino.programas.length) { destino.programaAtivo = destino.programas[0].id; mudou = true; }
   const p = origem.perfil || {};
   if (!destino.perfil.nascimento && p.nascimento) { destino.perfil.nascimento = p.nascimento; mudou = true; }
   if (!destino.perfil.altura && p.altura) { destino.perfil.altura = p.altura; mudou = true; }
@@ -109,14 +113,12 @@ async function sincronizarAoAbrir() {
   } else {
     enviar = true; // primeira vez no servidor, ou alterações feitas offline neste aparelho
   }
+  if (migrarProgramas(db)) enviar = true; // dados no formato anterior aos programas
   migrarFichas();
   if (!localStorage.getItem(migradoKey(id))) {
     for (const antigo of dadosLocaisAntigos()) if (juntar(db, Object.assign(novoDb(), antigo))) enviar = true;
     localStorage.setItem(migradoKey(id), '1');
   }
-  const antes = db.sessoes.length;
-  importarHistorico();
-  if (db.sessoes.length !== antes) enviar = true;
   gravarCache();
   if (enviar) { db.atualizadoEm = Date.now(); gravarCache(); localStorage.setItem(pendenteKey(id), '1'); await enviarAoServidor(); }
   else { estadoSync.situacao = 'ok'; estadoSync.ultima = new Date(); }

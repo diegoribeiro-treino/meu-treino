@@ -93,6 +93,8 @@ const EXTRAS = [
     video: 'ZvHOiAVh6Bk', dica: 'Cotovelos fixos ao lado do corpo; suba um braço de cada vez sem balançar o tronco.' },
   { id: 'cat-triceps-mergulho-banco', grupo: 'Tríceps', nome: 'Tríceps mergulho no banco', carga: 'corporal', reps: [8, 12], padrao: 'Tríceps · peso corporal', equip: 'Peso corporal',
     video: 'qAKB1H2kz2g', dica: 'Mãos no banco, cotovelos apontados para trás; desça só até onde o ombro ficar confortável.' },
+  { id: 'cat-agachamento-livre', grupo: 'Quadríceps', nome: 'Agachamento livre com barra', carga: 'total', reps: [8, 10], padrao: 'Quadríceps · agachamento e leg press', equip: 'Barra',
+    video: 'rM6SDUdl9fs', dica: 'Barra apoiada no trapézio, pés na largura dos ombros; desça com a coluna neutra e os joelhos na direção dos pés.' },
   { id: 'cat-agachamento-bulgaro', grupo: 'Quadríceps', nome: 'Agachamento búlgaro com halteres', carga: 'halter', reps: [8, 10], lado: 'por perna', padrao: 'Quadríceps · unilateral', equip: 'Halteres',
     video: 'MzjO0-M-wns', dica: 'Pé de trás apoiado no banco; desça com o tronco firme e o joelho da frente alinhado ao pé.' },
   { id: 'cat-stiff-halteres', grupo: 'Posteriores', nome: 'Stiff com halteres', carga: 'halter', reps: [8, 10], padrao: 'Posteriores · terra romeno / stiff', equip: 'Halteres',

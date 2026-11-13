@@ -15,7 +15,7 @@ const SEM_CARGA = (ex) => ex.carga === 'corporal';
 function novoDb() {
   return {
     versao: 1, sessoes: [], ativa: null, config: { telaLigada: true },
-    fichas: {}, // fichas editadas no app (substituem as de treinos.js)
+    programas: [], programaAtivo: null, // programas.js
     perfil: { nascimento: '', altura: '', pesos: [] }, // pesos: [{ data, kg }]
   };
 }
@@ -69,14 +69,12 @@ function toast(msg) {
 
 // ---------- Regras de treino ----------
 const exerciciosDe = (t) => t.blocos.flatMap((b) => b.exercicios);
-// Ficha em uso: a versão editada no app, se houver; senão a original de treinos.js
-const fichaDe = (id) => (db.fichas && db.fichas[id]) || TREINOS[id];
 
 // Dados de um exercício pelo id: fichas atuais, depois as originais, depois a cópia guardada na sessão
 // (para exercícios que foram removidos ou trocados depois do treino).
 function exInfo(id, sessao) {
-  for (const f of FICHAS) { const e = exerciciosDe(fichaDe(f)).find((x) => x.id === id); if (e) return e; }
-  for (const f of FICHAS) { const e = exerciciosDe(TREINOS[f]).find((x) => x.id === id); if (e) return e; }
+  for (const f of fichasIds()) { const e = exerciciosDe(fichaDe(f)).find((x) => x.id === id); if (e) return e; }
+  for (const f of Object.keys(TREINOS)) { const e = exerciciosDe(TREINOS[f]).find((x) => x.id === id); if (e) return e; }
   const c = catalogoPorId(id);
   if (c) return c;
   const n = sessao && sessao.nomes && sessao.nomes[id];
@@ -129,11 +127,12 @@ function sincronizarSeries(a, t) {
 // Fichas copiadas no aparelho antes dos complementares com vídeo guardam textos simples.
 // Se os blocos não mudaram, a cópia é descartada e o app volta à ficha atualizada; senão os textos viram itens.
 function migrarFichas() {
-  for (const f of Object.keys(db.fichas || {})) {
-    const t = db.fichas[f];
+  migrarProgramas(db);
+  for (const p of db.programas) for (const f of Object.keys(p.fichas)) {
+    const t = p.fichas[f];
     const antigo = (l) => (l || []).some((x) => typeof x === 'string');
     if (!antigo(t.preparacao) && !antigo(t.core) && !antigo(t.mobilidade)) continue;
-    if (JSON.stringify(t.blocos) === JSON.stringify(TREINOS[f].blocos)) { delete db.fichas[f]; continue; }
+    if (p.origem === 'padrao' && TREINOS[f] && JSON.stringify(t.blocos) === JSON.stringify(TREINOS[f].blocos)) { delete p.fichas[f]; continue; }
     const item = (x) => (typeof x === 'string' ? { id: `comp-${uid()}`, nome: x, series: 1, dose: '', dica: '' } : x);
     t.avisos = [...(t.avisos || []), ...(t.preparacao || []).filter((x) => typeof x === 'string' && /^Aproxima|^Joelho/.test(x))];
     t.preparacao = (t.preparacao || []).filter((x) => !(typeof x === 'string' && /^Aproxima|^Joelho/.test(x))).map(item);
@@ -141,11 +140,12 @@ function migrarFichas() {
     t.mobilidade = (t.mobilidade || []).map(item);
   }
 }
-// Sugestão: a ficha seguinte à última feita, na ordem de FICHAS (A1 quando ainda não há treinos)
+// Sugestão: a ficha seguinte à última feita no programa ativo (a primeira quando ainda não há treinos)
 function proximaFicha() {
-  const ult = sessoesOrdenadas()[0];
-  if (!ult) return FICHAS[0];
-  return FICHAS[(FICHAS.indexOf(ult.treino) + 1) % FICHAS.length];
+  const p = programaAtivo(), ordem = fichasIds(p);
+  if (!ordem.length) return null;
+  const ult = sessoesOrdenadas().find((s) => s.programa === p.id && ordem.includes(s.treino));
+  return ult ? ordem[(ordem.indexOf(ult.treino) + 1) % ordem.length] : ordem[0];
 }
 let fichaEscolhida = null; // escolha feita na tela Hoje (vale até recarregar o app)
 const sessoesOrdenadas = () => [...db.sessoes].sort((a, b) => b.inicio - a.inicio);
@@ -209,7 +209,7 @@ function iniciarTreino(fichaId, dataManual = null) {
     if (ex.extra) extras[ex.id] = (ult && ult.sessao.extras && ult.sessao.extras[ex.id]) || '';
   }
   db.ativa = {
-    id: uid(), treino: fichaId, inicio: Date.now(), series, extras, trocas: {},
+    id: uid(), treino: fichaId, programa: db.programaAtivo, inicio: Date.now(), series, extras, trocas: {},
     checks: { cardioIni: false, prep: checksComp(t.preparacao), core: checksComp(t.core), mob: checksComp(t.mobilidade) },
     descanso: null, dataManual,
   };
@@ -312,6 +312,7 @@ const telas = {
   progresso: telaProgresso, exercicio: telaExercicio, ajustes: telaAjustes,
   treinos: telaTreinos, ficha: telaFicha, 'editar-ex': telaEditarEx, 'editar-bloco': telaEditarBloco, 'editar-textos': telaEditarTextos,
   'editar-comp': telaEditarComp, catalogo: telaCatalogo, trocar: telaTrocar, escolher: telaEscolher,
+  criar: telaCriar, programa: telaPrograma, importar: telaImportar,
   relatorios: telaRelatorios,
 };
 
@@ -330,6 +331,7 @@ function render() {
     treino: 'hoje', finalizar: 'hoje', registrar: 'hoje', sessao: 'historico', exercicio: 'progresso',
     ficha: 'treinos', 'editar-ex': 'treinos', 'editar-bloco': 'treinos', 'editar-textos': 'treinos', 'editar-comp': 'treinos',
     catalogo: 'treinos', escolher: 'treinos', trocar: rotaAtual().arg === 'sessao' ? 'hoje' : 'treinos',
+    criar: 'treinos', programa: 'treinos', importar: 'treinos',
   }[pag] || pag;
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('sel', a.dataset.tab === aba));
   tick();
@@ -341,10 +343,27 @@ window.addEventListener('hashchange', render);
 function telaHoje() {
   const hoje = new Date();
   const iso = isoDia(hoje);
-  const sugestao = proximaFicha();
-  const ficha = fichaEscolhida || sugestao;
-  const feitasHoje = db.sessoes.filter((s) => s.data === iso);
+  const prog = programaAtivo();
   let h = `<p class="muted">${fmtDataLonga(iso)}</p><h1>Hoje</h1>`;
+  if (!prog) {
+    return h + `<div class="card destaque"><h2>Vamos montar o seu treino</h2>
+      <p class="muted small">Responda algumas perguntas para o app gerar as suas fichas, monte você mesmo pelo catálogo ou importe uma ficha pronta.</p>
+      <a class="btn" href="#/criar">Criar meu treino</a>
+      <a class="btn sec" href="#/importar">Importar treino pronto (PDF ou texto)</a></div>
+      <p class="muted small">Versão de testes: as sugestões de treino não substituem a orientação de um profissional de educação física.</p>`;
+  }
+  const sugestao = proximaFicha();
+  const ficha = fichaEscolhida && fichasIds().includes(fichaEscolhida) ? fichaEscolhida : sugestao;
+  const feitasHoje = db.sessoes.filter((s) => s.data === iso);
+  const andamento = progressoPrograma(prog);
+  h += `<a class="prog-linha" href="#/programa/${prog.id}"><span><b>${esc(prog.nome)}</b> · ${esc(andamento.texto)}</span><span class="seta">›</span></a>
+    ${andamento.fracao !== null ? `<div class="progresso-barra"><i style="width:${andamento.fracao * 100}%"></i></div>` : ''}`;
+  if (andamento.concluido && !db.ativa) {
+    h += `<div class="card destaque"><h2>Programa concluído! 🎉</h2>
+      <p class="small muted">Você completou ${esc(descreverPeriodo(prog.periodicidade))} de ${esc(prog.nome)}. É uma boa hora para trocar o treino.</p>
+      <a class="btn" href="#/criar">Criar o próximo programa</a>
+      <button class="btn sec" data-acao="prog-renovar" data-id="${prog.id}">Renovar este programa</button></div>`;
+  }
 
   if (db.ativa) {
     const t = fichaDe(db.ativa.treino);
@@ -356,7 +375,7 @@ function telaHoje() {
       <a class="btn" href="#/treino">Continuar treino</a></div>`;
   } else {
     const t = fichaDe(ficha);
-    const ult = sessoesOrdenadas().find((s) => s.treino === ficha);
+    const ult = sessoesOrdenadas().find((s) => s.treino === ficha && s.programa === prog.id);
     const rotulo = ficha === sugestao ? 'Próximo da sequência' : 'Escolhido para hoje';
     h += `<div class="card destaque">
       <div class="linha entre"><span class="tag ac">${rotulo}</span>${feitasHoje.length ? `<span class="tag ok">✓ Hoje: ${feitasHoje.map((s) => s.treino).join(', ')}</span>` : ''}</div>
@@ -368,10 +387,10 @@ function telaHoje() {
 
   if (!db.ativa) {
     h += `<h3>Escolha o treino de hoje</h3><div class="fichas">`;
-    for (const f of FICHAS) {
-      const ult = sessoesOrdenadas().find((s) => s.treino === f);
-      h += `<button class="ficha ${f === ficha ? 'sel' : ''}" data-acao="escolher" data-ficha="${f}">
-        <b>${f}</b><span>${TIPO_FICHA[f]}</span><span>${ult ? 'Último ' + fmtData(ult.data) : 'Nunca feito'}</span>
+    for (const f of fichasIds()) {
+      const ult = sessoesOrdenadas().find((s) => s.treino === f && s.programa === prog.id);
+      h += `<button class="ficha ${f === ficha ? 'sel' : ''}" data-acao="escolher" data-ficha="${esc(f)}">
+        <b>${esc(f)}</b><span>${esc(tipoFicha(f))}</span><span>${ult ? 'Último ' + fmtData(ult.data) : 'Nunca feito'}</span>
         ${f === sugestao ? '<span class="prox">próximo</span>' : ''}</button>`;
     }
     h += `</div><p class="muted small" style="margin-top:8px">Toque numa ficha para escolher. Qualquer dia pode ser de treino ou de descanso, inclusive o domingo.</p>
@@ -402,8 +421,9 @@ function telaRegistrar() {
     <div class="card"><h2>Data do treino</h2>
       <input type="date" class="input-texto" data-reg="data" value="${registro.data}" max="${hoje}"></div>
     <div class="card"><h2>Qual ficha?</h2><div class="fichas" style="margin-top:8px">`;
-  for (const f of FICHAS) {
-    h += `<button class="ficha ${f === registro.ficha ? 'sel' : ''}" data-acao="registro-ficha" data-ficha="${f}"><b>${f}</b><span>${TIPO_FICHA[f]}</span></button>`;
+  if (!programaAtivo()) return h + `</div><p class="muted small">Crie um programa antes de registrar treinos.</p><a class="btn" href="#/criar">Criar meu treino</a></div>`;
+  for (const f of fichasIds()) {
+    h += `<button class="ficha ${f === registro.ficha ? 'sel' : ''}" data-acao="registro-ficha" data-ficha="${esc(f)}"><b>${esc(f)}</b><span>${esc(tipoFicha(f))}</span></button>`;
   }
   h += `</div></div>
     <button class="btn" data-acao="registro-abrir" ${registro.ficha ? '' : 'disabled style="opacity:.5"'}>${registro.ficha ? `Anotar ${registro.ficha} de ${fmtData(registro.data)}` : 'Escolha a ficha'}</button>`;
@@ -464,14 +484,14 @@ function telaTreino() {
   let h = `<div class="topo-treino">
     <div class="linha entre"><div><b>${esc(t.titulo)}</b> <span class="muted small">· ${esc(t.tipo)}</span></div><span class="cron" id="cron"></span></div>
     <div class="small muted" style="margin-top:2px"><span id="contador">${feitas}/${total} séries</span></div>
-    <div class="progresso-barra"><i id="barra" style="width:${(feitas / total) * 100}%"></i></div></div>`;
+    <div class="progresso-barra"><i id="barra" style="width:${(feitas / (total || 1)) * 100}%"></i></div></div>`;
 
   if (a.dataManual) {
     h += `<div class="card destaque small">Registro de <b>${fmtDataLonga(a.dataManual)}</b>: anote cargas e repetições que lembrar e marque ✓. Séries não marcadas não contam. Sem cronômetro nem descanso.</div>`;
   }
   h += `<div class="card"><details><summary class="small muted">Como executar ▾</summary><p class="small muted">${esc(t.instrucoes)}</p></details></div>`;
 
-  h += `<div class="card"><h2>${esc(t.cardioInicial.titulo)}</h2>${checkItem('cardioIni', 0, t.cardioInicial.texto, a.checks.cardioIni)}</div>`;
+  if (t.cardioInicial) h += `<div class="card"><h2>${esc(t.cardioInicial.titulo)}</h2>${checkItem('cardioIni', 0, t.cardioInicial.texto, a.checks.cardioIni)}</div>`;
   h += cartaoSecaoComp(t.tituloPreparacao || 'Preparação', 'prep', t.preparacao, a.checks.prep, t.avisos);
 
   let n = 0;
@@ -518,7 +538,7 @@ function telaTreino() {
 
   h += cartaoSecaoComp('Core', 'core', t.core || [], a.checks.core);
   h += cartaoSecaoComp(t.tituloMobilidade || 'Mobilidade', 'mob', t.mobilidade, a.checks.mob);
-  h += `<div class="card"><h2>${esc(t.cardioFinal.titulo)}</h2><p class="small muted">${esc(t.cardioFinal.texto)}</p><p class="small muted">Você marca se fez ao finalizar.</p></div>`;
+  if (t.cardioFinal) h += `<div class="card"><h2>${esc(t.cardioFinal.titulo)}</h2><p class="small muted">${esc(t.cardioFinal.texto)}</p><p class="small muted">Você marca se fez ao finalizar.</p></div>`;
   h += `<a class="btn" href="#/finalizar">Finalizar treino</a>
     <button class="btn perigo" data-acao="descartar">Descartar treino</button>`;
   return h;
@@ -529,7 +549,7 @@ function atualizarContador() {
   const { total, feitas } = contarSeries(fichaDe(a.treino), a.series);
   const c = $('#contador'), b = $('#barra');
   if (c) c.textContent = `${feitas}/${total} séries`;
-  if (b) b.style.width = `${(feitas / total) * 100}%`;
+  if (b) b.style.width = `${(feitas / (total || 1)) * 100}%`;
 }
 
 // ---------- Tela: Finalizar ----------
@@ -545,11 +565,11 @@ function telaFinalizar() {
     <p class="muted">${a.dataManual ? `Registro de ${fmtDataLonga(a.dataManual)} · ` : ''}${feitas} de ${total} séries registradas</p>
     <div class="card"><h2>Tempo total</h2>${a.dataManual ? '<p class="muted small">Opcional: deixe em branco se não lembrar.</p>' : ''}
       <label class="campo"><input inputmode="numeric" data-fim="duracao" value="${f.duracao}" placeholder="–"><em>min</em></label></div>
-    <div class="card"><h2>${esc(t.cardioFinal.titulo)}</h2>
+    ${t.cardioFinal ? `<div class="card"><h2>${esc(t.cardioFinal.titulo)}</h2>
       <div class="opcoes">
-        <button class="${f.cardioFinal === 'feito' ? 'sel' : ''}" data-acao="fim-opcao" data-campo="cardioFinal" data-valor="feito">15 min feitos</button>
+        <button class="${f.cardioFinal === 'feito' ? 'sel' : ''}" data-acao="fim-opcao" data-campo="cardioFinal" data-valor="feito">${t.cardioFinal.min || 15} min feitos</button>
         <button class="${f.cardioFinal === 'dispensado' ? 'sel' : ''}" data-acao="fim-opcao" data-campo="cardioFinal" data-valor="dispensado">Dispensado</button>
-      </div></div>
+      </div></div>` : ''}
     <div class="card"><h2>Esforço da sessão</h2><p class="muted small">0 = muito leve · 10 = máximo</p>
       <div class="opcoes">${Array.from({ length: 11 }, (_, i) => `<button class="${f.esforco === i ? 'sel' : ''}" data-acao="fim-opcao" data-campo="esforco" data-valor="${i}">${i}</button>`).join('')}</div></div>
     <div class="card"><h2>Observações</h2>
@@ -567,7 +587,10 @@ function salvarSessao() {
   const sessao = {
     id: a.id, treino: a.treino, data: a.dataManual || isoDia(new Date(a.inicio)), inicio, termino: retroativo ? inicio : Date.now(),
     duracaoMin: num(f.duracao) ?? (a.dataManual ? null : Math.round((Date.now() - a.inicio) / 60000)),
-    registroManual: !!a.dataManual,
+    registroManual: !!a.dataManual, programa: a.programa || db.programaAtivo,
+    // minutos de cardio feitos, para a estimativa de calorias (relatorios.js)
+    cardioIniMin: a.checks.cardioIni ? fichaDe(a.treino)?.cardioInicial?.min || 15 : 0,
+    cardioFimMin: f.cardioFinal === 'feito' ? fichaDe(a.treino)?.cardioFinal?.min || 15 : 0,
     series: a.series, checks: a.checks, extras: a.extras || {},
     cardioFinal: f.cardioFinal || null, esforco: f.esforco ?? null, notas: (f.notas || '').trim(),
     nomes: {}, // cópia dos dados de cada exercício, para o histórico sobreviver a edições da ficha
@@ -591,7 +614,7 @@ function telaHistorico() {
   if (!lista.length) return `<h1>Histórico</h1><div class="vazio">Nenhum treino registrado ainda.<br>Os treinos finalizados aparecem aqui.</div>${botao}`;
   let h = `<h1>Histórico</h1><p class="muted">${lista.length} treino${lista.length > 1 ? 's' : ''} registrado${lista.length > 1 ? 's' : ''}</p>${botao}<div class="card">`;
   for (const s of lista) {
-    const t = fichaDe(s.treino);
+    const t = fichaDaSessao(s);
     const c = t ? contarSeries(t, s.series) : null;
     const info = [s.duracaoMin != null ? `${s.duracaoMin} min` : null, c ? `${c.feitas}/${s.planejadas ?? Math.max(c.total, c.feitas)} séries` : null,
       s.esforco != null ? `esforço ${s.esforco}/10` : null, s.registroManual ? 'registrado depois' : null].filter(Boolean).join(' · ');
@@ -606,16 +629,16 @@ function telaHistorico() {
 function telaSessao(id) {
   const s = db.sessoes.find((x) => x.id === id);
   if (!s) return `<div class="vazio">Treino não encontrado.<a class="btn sec" href="#/historico">Voltar</a></div>`;
-  const t = fichaDe(s.treino);
+  const t = fichaDaSessao(s);
   let h = `<a href="#/historico" class="small">‹ Histórico</a><h1>${esc(s.treino)} · ${fmtData(s.data)}</h1>
     <p class="muted">${fmtDataLonga(s.data)}</p>
     <div class="card"><div class="linha entre"><span>Tempo total</span><b>${s.duracaoMin != null ? s.duracaoMin + ' min' : '–'}</b></div>
-      <div class="linha entre"><span>Cardio final</span><b>${s.cardioFinal === 'feito' ? '15 min' : s.cardioFinal === 'dispensado' ? 'Dispensado' : '–'}</b></div>
+      <div class="linha entre"><span>Cardio final</span><b>${s.cardioFinal === 'feito' ? `${s.cardioFimMin || 15} min` : s.cardioFinal === 'dispensado' ? 'Dispensado' : '–'}</b></div>
       <div class="linha entre"><span>Esforço</span><b>${s.esforco ?? '–'}/10</b></div>
       ${s.notas ? `<p class="muted small" style="margin-top:8px">${esc(s.notas)}</p>` : ''}</div>`;
-  if (t) {
+  {
     // Exercícios na ordem da ficha atual, seguidos dos que foram feitos mas já não estão nela
-    const ids = exerciciosDe(t).map((x) => x.id);
+    const ids = t ? exerciciosDe(t).map((x) => x.id) : [];
     for (const id in s.series) if (!ids.includes(id) && s.series[id].some((x) => x.ok)) ids.push(id);
     h += `<div class="card"><table><tr><th>Exercício</th><th class="num">Séries</th></tr>`;
     for (const id of ids) {
@@ -669,10 +692,11 @@ function grafico(pontos, alto = 70) {
 }
 
 function telaProgresso(fichaSel) {
-  const sel = fichaSel || (sessoesOrdenadas()[0] || {}).treino || 'A1';
-  let h = `<h1>Progresso</h1><div class="chips">${FICHAS.map((f) => `<a href="#/progresso/${f}" class="${f === sel ? 'sel' : ''} ${fichaDe(f) ? '' : 'vazia'}">${f}</a>`).join('')}</div>`;
+  const ids = fichasIds();
+  if (!ids.length) return `<h1>Progresso</h1><div class="vazio">Crie um programa de treino para acompanhar o progresso.<a class="btn" href="#/criar">Criar meu treino</a></div>`;
+  const sel = ids.includes(fichaSel) ? fichaSel : ids.includes((sessoesOrdenadas()[0] || {}).treino) ? sessoesOrdenadas()[0].treino : ids[0];
+  let h = `<h1>Progresso</h1><p class="muted small">${esc(programaAtivo().nome)}</p><div class="chips">${ids.map((f) => `<a href="#/progresso/${encodeURIComponent(f)}" class="${f === sel ? 'sel' : ''}">${esc(f)}</a>`).join('')}</div>`;
   const t = fichaDe(sel);
-  if (!t) return h + `<div class="vazio">Ficha ${sel} ainda não cadastrada.</div>`;
   h += `<p class="muted small" style="margin-top:12px">${esc(t.progressao)}</p>`;
   for (const ex of exerciciosDe(t)) {
     const pts = pontosExercicio(ex);
@@ -691,7 +715,7 @@ function telaProgresso(fichaSel) {
 
 function telaExercicio(exId) {
   let ex, ficha;
-  for (const f of FICHAS) { const t = fichaDe(f); if (!t) continue; const e = exerciciosDe(t).find((x) => x.id === exId); if (e) { ex = e; ficha = f; } }
+  for (const f of fichasIds()) { const t = fichaDe(f); if (!t) continue; const e = exerciciosDe(t).find((x) => x.id === exId); if (e) { ex = e; ficha = f; } }
   if (!ex) {
     // Exercício que já saiu da ficha: usa os dados guardados nas sessões
     const s = sessoesOrdenadas().find((x) => x.series[exId]);
@@ -766,9 +790,9 @@ function telaAjustes() {
       <p class="muted small">Os dados ficam salvos só neste celular. Faça backup de vez em quando (ex.: salvar no app Arquivos ou iCloud Drive).</p>
       <button class="btn" data-acao="exportar">Exportar backup</button>
       <label class="btn sec">Importar backup<input type="file" accept="application/json,.json" data-acao="importar" hidden></label></div>
-    <div class="card"><h2>Sequência de treinos</h2>
-      <p class="small">Sequência sugerida: ${FICHAS.join(' → ')} → ${FICHAS[0]}</p>
-      <p class="muted small">Não há dia fixo: o app sugere a ficha seguinte à última feita, mas você escolhe qualquer uma, em qualquer dia, inclusive domingo.</p></div>
+    ${programaAtivo() ? `<div class="card"><h2>Sequência de treinos</h2>
+      <p class="small">${esc(programaAtivo().nome)}: ${fichasIds().map(esc).join(' → ')} → ${esc(fichasIds()[0])}</p>
+      <p class="muted small">Não há dia fixo: o app sugere a ficha seguinte à última feita, mas você escolhe qualquer uma, em qualquer dia, inclusive domingo.</p></div>` : ''}
     <div class="card"><p class="muted small">${db.sessoes.length} treinos salvos.</p>
       <button class="btn perigo" data-acao="apagar-tudo">Apagar todos os dados</button></div>`;
 }

@@ -266,7 +266,7 @@ function gerarDemo() {
   for (let n = 21; n >= 1; n--) {
     const d = new Date(); d.setDate(d.getDate() - n);
     if (d.getDay() === 0 || n % 7 === 3) continue; // domingos e algumas folgas
-    const f = FICHAS[k % FICHAS.length];
+    const f = FICHAS[k % FICHAS.length]; // demonstração: modelo AB
     const t = TREINOS[f];
     const semana = Math.floor((21 - n) / 7);
     const series = {}, nomes = {};
@@ -289,7 +289,7 @@ function gerarDemo() {
   }
   const inicioPeso = new Date(); inicioPeso.setDate(inicioPeso.getDate() - 21);
   db = Object.assign(novoDb(), {
-    sessoes,
+    sessoes: sessoes.map((s) => ({ ...s, programa: ID_PADRAO })), programas: [programaPadrao()], programaAtivo: ID_PADRAO,
     perfil: { nascimento: '1990-01-01', altura: '175', pesos: [{ data: isoDia(inicioPeso), kg: 80 }, { data: isoDia(), kg: 78.5 }] },
   });
   salvar();

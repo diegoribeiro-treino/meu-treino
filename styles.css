@@ -156,6 +156,24 @@ textarea, .input-texto { width: 100%; font: inherit; color: var(--text); backgro
 .ed-ex .ed-acoes { width: 100%; justify-content: flex-end; }
 .descanso .btn-fechar { min-width: 44px; min-height: 40px; font-size: 18px; }
 
+/* Programas, assistente e importação */
+.prog-linha { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--text); text-decoration: none; font-size: 14px; padding: 4px 0; }
+.escolhas { display: grid; gap: 8px; margin-top: 8px; }
+.escolhas button, .escolha-grande { display: block; width: 100%; text-align: left; padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; cursor: pointer; text-decoration: none; margin-top: 10px; }
+.escolhas button { margin-top: 0; }
+.escolhas button b, .escolha-grande b { display: block; font-size: 16px; }
+.escolhas button span, .escolha-grande span { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+.escolhas button.sel { border-color: var(--accent); background: var(--accent-soft); }
+.assistente { margin-top: 10px; }
+.pref-item { padding: 8px 0; border-top: 1px solid var(--line); gap: 8px; }
+.btn-mini.pref-sim { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-mini.pref-nao { background: var(--danger); border-color: var(--danger); color: #fff; }
+details.card summary { cursor: pointer; list-style: none; }
+details.card summary::-webkit-details-marker { display: none; }
+.imp-ex { padding: 10px 0; border-top: 1px solid var(--line); }
+.imp-ex select { width: 100%; font: inherit; font-size: 15px; color: var(--text); background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 9px; }
+.imp-ex .campo input { padding-right: 38px; font-size: 16px; }
+
 /* Login */
 body.sem-login { padding-bottom: 24px; }
 body.sem-login .nav { display: none; }
