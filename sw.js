@@ -1,7 +1,7 @@
 // Guarda o app no celular para funcionar sem internet.
 // Ao publicar uma nova versão, aumente o número abaixo.
-const VERSAO = 'meutreino-v6';
-const ARQUIVOS = ['./', 'index.html', 'styles.css', 'app.js', 'treinos.js', 'editor.js', 'relatorios.js', 'manifest.webmanifest',
+const VERSAO = 'meutreino-v7';
+const ARQUIVOS = ['./', 'index.html', 'styles.css', 'app.js', 'treinos.js', 'editor.js', 'relatorios.js', 'auth.js', 'manifest.webmanifest',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

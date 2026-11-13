@@ -139,6 +139,15 @@ body { padding-top: 0; }
 .opcoes button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
 textarea, .input-texto { width: 100%; font: inherit; color: var(--text); background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-top: 8px; }
 
+/* Login */
+body.sem-login { padding-bottom: 24px; }
+body.sem-login .nav { display: none; }
+.login { max-width: 420px; margin: 0 auto; padding-top: calc(32px + env(safe-area-inset-top, 0px)); }
+.login-topo { text-align: center; margin-bottom: 8px; }
+.login-logo { width: 72px; height: 72px; border-radius: 18px; display: block; margin: 0 auto 10px; }
+.login-erro { color: var(--danger); margin: 0; }
+.login .card .btn.sec { margin-top: 10px; }
+
 /* Formulários */
 .form { display: grid; gap: 12px; margin-top: 10px; }
 .form label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }

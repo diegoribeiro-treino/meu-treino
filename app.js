@@ -1,7 +1,11 @@
 'use strict';
 
 // ---------- Armazenamento ----------
-const STORE_KEY = 'meutreino:v1';
+// Cada perfil (conta) tem o próprio banco em localStorage, na chave meutreino:dados:<id da conta>.
+// As contas e o login ficam em auth.js.
+const CHAVE_ANTIGA = 'meutreino:v1'; // dados de antes do login; passam para o primeiro perfil criado
+const chaveDados = (contaId) => `meutreino:dados:${contaId}`;
+let contaAtual = null;
 const DIAS = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
 const DIAS_LONGOS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const UNIDADE = { halter: 'kg/halter', total: 'kg', unico: 'kg', assist: 'kg de assistência', corporal: '', elastico: '' };
@@ -15,17 +19,23 @@ function novoDb() {
     perfil: { nascimento: '', altura: '', pesos: [] }, // pesos: [{ data, kg }]
   };
 }
-function carregar() {
+function carregar(contaId) {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    const raw = localStorage.getItem(chaveDados(contaId));
     if (raw) return Object.assign(novoDb(), JSON.parse(raw));
   } catch (e) { /* dados ilegíveis: começa do zero */ }
   return novoDb();
 }
-let db = carregar();
+let db = novoDb();
 function salvar() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
+  if (!contaAtual) return;
+  try { localStorage.setItem(chaveDados(contaAtual.id), JSON.stringify(db)); }
   catch (e) { toast('Não foi possível salvar no aparelho'); }
+}
+function abrirConta(conta) {
+  contaAtual = conta;
+  db = carregar(conta.id);
+  fichaEscolhida = null;
 }
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
@@ -243,6 +253,8 @@ const telas = {
 
 let ultimaPag = null;
 function render() {
+  document.body.classList.toggle('sem-login', !contaAtual);
+  if (!contaAtual) { app.innerHTML = telaLogin(); $('#descanso').hidden = true; return; }
   const { pag, arg, args } = rotaAtual();
   const fn = telas[pag] || telaHoje;
   const mesmaPag = pag === ultimaPag;
@@ -661,6 +673,7 @@ function cartaoPerfil() {
 
 function telaAjustes() {
   return `<h1>Ajustes</h1>
+    ${cartaoConta()}
     ${cartaoPerfil()}
     <div class="card"><div class="linha entre"><div class="cresce"><b>Manter tela ligada</b><p class="muted small">Durante o treino a tela não apaga sozinha.</p></div>
       <button class="btn-mini" data-acao="tela">${db.config.telaLigada ? 'Ligado' : 'Desligado'}</button></div></div>
@@ -855,4 +868,6 @@ document.addEventListener('keydown', (e) => {
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+const contaSalva = contaDaSessao();
+if (contaSalva) abrirConta(contaSalva);
 render();
