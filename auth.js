@@ -22,10 +22,15 @@ function gravarContas(contas) { localStorage.setItem(CONTAS_KEY, JSON.stringify(
 const temDono = () => lerContas().some((c) => c.dono);
 
 // CPF pode ser digitado com ou sem pontos e traço; usuário ignora maiúsculas
+// CPF pode ser digitado com qualquer pontuação (inclusive o hífen e os espaços especiais que o
+// teclado do iPhone às vezes insere): sem letras, vale só os dígitos. Usuário ignora maiúsculas.
 function normLogin(s) {
-  const t = (s || '').trim().toLowerCase();
-  return /^[\d.\-\s]+$/.test(t) ? t.replace(/\D/g, '') : t;
+  const t = (s || '').normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toLowerCase();
+  return /\p{L}/u.test(t) ? t.replace(/\s+/g, '') : t.replace(/\D/g, '');
 }
+// Busca a conta comparando os dois lados já normalizados (contas antigas podem ter sido gravadas
+// com pontuação que a versão anterior não removia)
+const acharConta = (contas, login) => contas.find((c) => normLogin(c.login) === login);
 const normEmail = (s) => (s || '').trim().toLowerCase();
 const emailValido = (s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
 function mascararEmail(e) {
@@ -34,7 +39,8 @@ function mascararEmail(e) {
 }
 
 function mascararLogin(login) {
-  return /^\d{11}$/.test(login) ? `${login.slice(0, 3)}.***.***-${login.slice(9)}` : login;
+  const d = normLogin(login);
+  return /^\d{11}$/.test(d) ? `${d.slice(0, 3)}.***.***-${d.slice(9)}` : login;
 }
 
 const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -96,6 +102,8 @@ function telaLogin() {
         <p class="login-erro small" id="login-erro" hidden></p>
         <button class="btn" type="submit">Redefinir senha e entrar</button>
       </form>
+      ${temDono() ? '' : `<div class="card small">Nenhum acesso foi criado neste aparelho ainda.
+        <button class="btn sec" data-acao="login-modo" data-modo="criar">Criar meu acesso</button></div>`}
       <button class="btn sec" data-acao="login-modo" data-modo="entrar">Voltar ao login</button></div>`;
   }
   if (criando) {
@@ -124,6 +132,15 @@ function telaLogin() {
       <button class="btn sec" data-acao="login-modo" data-modo="criar">Criar meu acesso</button></div>`}</div>`;
 }
 
+function dicaContas() {
+  const contas = lerContas().filter((c) => !c.demo);
+  return contas.length
+    ? `Contas neste aparelho: ${contas.map((c) => mascararLogin(c.login)).join(', ')}.`
+    : 'Nenhum acesso foi criado neste aparelho ainda: use "Criar meu acesso".';
+}
+const AVISO_IPHONE = 'No iPhone, o app aberto pelo ícone da tela inicial e o Safari guardam dados separados: '
+  + 'a conta só existe onde foi criada.';
+
 function erroLogin(msg) {
   const el = $('#login-erro');
   if (el) { el.textContent = msg; el.hidden = false; } else toast(msg);
@@ -136,11 +153,12 @@ async function enviarLogin(form) {
   botao.disabled = true; botao.textContent = 'Entrando...';
   try {
     await garantirDemo();
-    const conta = lerContas().find((c) => c.login === login);
+    const conta = acharConta(lerContas(), login);
     if (conta && (await conferirSenha(conta, senha))) return entrar(conta);
     falhas++;
     if (falhas >= 5) { bloqueadoAte = Date.now() + 30000; falhas = 0; }
-    erroLogin('Login ou senha incorretos.');
+    erroLogin(conta ? 'Senha incorreta. Se esqueceu, use "Esqueci minha senha".'
+      : `Não há conta com esse CPF/usuário neste aparelho. ${dicaContas()} ${AVISO_IPHONE}`);
   } finally {
     botao.disabled = false; botao.textContent = 'Entrar';
   }
@@ -155,7 +173,7 @@ async function enviarCriacao(form, { dono }) {
   if (senha.length < 6) return toast('A senha precisa ter pelo menos 6 caracteres');
   if (senha !== form.senha2.value) return toast('As senhas não conferem');
   const contas = lerContas();
-  if (contas.some((c) => c.login === login)) return toast('Já existe um perfil com esse login');
+  if (acharConta(contas, login)) return toast('Já existe um perfil com esse login');
   const conta = { id: uid(), login, nome, email, dono, ...(await novaCredencial(senha)) };
   contas.push(conta);
   gravarContas(contas);
@@ -174,13 +192,16 @@ async function enviarRedefinicao(form) {
   if (senha.length < 6) return erroLogin('A senha precisa ter pelo menos 6 caracteres.');
   if (senha !== form.senha2.value) return erroLogin('As senhas não conferem.');
   const contas = lerContas();
-  const conta = contas.find((c) => c.login === login && !c.demo);
+  const conta = acharConta(contas.filter((c) => !c.demo), login);
   if (!conta || (conta.email && conta.email !== email)) {
     falhas++;
     if (falhas >= 5) { bloqueadoAte = Date.now() + 30000; falhas = 0; }
-    return erroLogin('Login ou e-mail não conferem.');
+    return erroLogin(!conta
+      ? `Não há conta com esse CPF/usuário neste aparelho. ${dicaContas()} ${AVISO_IPHONE}`
+      : `Esse não é o e-mail cadastrado nesta conta (${mascararEmail(conta.email)}).`);
   }
   conta.email ||= email;
+  conta.login = normLogin(conta.login);
   Object.assign(conta, await novaCredencial(senha));
   gravarContas(contas);
   toast('Senha redefinida');
