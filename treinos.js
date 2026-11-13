@@ -6,8 +6,11 @@
 // "carga": halter (kg por halter) · total (kg da máquina/barra) · unico (um halter)
 //          assist (kg de assistência: menos é progresso) · corporal (sem carga) · elastico (cor/nível do elástico)
 // "lado": texto ao lado das repetições (ex.: 'por perna'). "extra": campo livre a anotar (ex.: altura do degrau).
-// Blocos com modo: 'series' são séries tradicionais (descanso após cada série);
-// sem modo, o bloco é feito em voltas (descanso após cada volta).
+// Blocos são feitos em voltas (circuito): uma série de cada exercício do bloco, em sequência e
+// sem descanso entre eles; o descanso vem ao fim de cada volta. (modo: 'series' = séries
+// tradicionais, com descanso após cada série; usado só se a ficha for editada assim.)
+// preparacao, core e mobilidade são exercícios complementares: { id, nome, series, dose, dica, video }.
+// avisos: orientações em texto da preparação (aproximação, cuidados).
 
 // Ordem da sequência. Não há dia fixo: o app sugere a ficha seguinte à última feita,
 // e qualquer ficha pode ser escolhida em qualquer dia (inclusive domingo).
@@ -47,15 +50,16 @@ const BASE_B = {
   tipo: 'Membros inferiores',
   resumo: '3 quadríceps · 3 posteriores · 2 glúteos · 2 panturrilhas',
   instrucoes:
-    '2 séries por exercício, em séries tradicionais: complete as duas séries de um exercício antes de passar ao próximo. ' +
-    'Use 2-3 repetições de reserva. No terra, deixe 3 repetições de reserva; sem circuito rápido. ' +
+    '2 voltas por bloco = 2 séries por exercício. Faça uma série de cada exercício do bloco em sequência, sem descanso entre eles; ' +
+    'descanse ao fim da volta e repita o bloco antes de avançar. Use 2-3 repetições de reserva; no terra, deixe 3. ' +
     'Unilaterais: faça os dois lados para completar uma série.',
   cardioInicial: {
     titulo: 'Cardio inicial · 15 min',
     texto: 'Bicicleta: 5 min leves + 10 min moderados (esforço 4-5/10). Ajuste o banco e a resistência para pedalar sem dor.',
   },
   tituloPreparacao: 'Preparação e joelho',
-  preparacao: [
+  preparacao: [],
+  avisos: [
     'Aproximação: 2-3 séries leves do terra e 1-2 do primeiro exercício de quadríceps (não contam nas 20 séries principais).',
     'Joelho: use amplitude confortável. Se doer, reduza carga/amplitude; se persistir ou piorar depois, interrompa e ajuste com o profissional.',
   ],
@@ -66,7 +70,7 @@ const BASE_B = {
 
 // O terra romeno se repete nas três fichas B com o mesmo id: o histórico de carga é compartilhado.
 const terraRomeno = (dica) => ({
-  nome: 'Terra', foco: 'Posteriores', modo: 'series', voltas: 2, descanso: [120, 180],
+  nome: 'Bloco 1', foco: 'Terra romeno', voltas: 2, descanso: [120, 180],
   exercicios: [
     { id: 'b-terra-romeno-barra', grupo: 'Posteriores', nome: 'Levantamento terra romeno com barra', carga: 'total', reps: [8, 10],
       video: 'QdNf6K1fbaQ', dica },
@@ -86,10 +90,10 @@ const TREINOS = {
       texto: 'Esteira: 5 min leves + 10 min moderados (esforço 5-6/10). Mantenha intensidade que não prejudique o treino de força.',
     },
     preparacao: [
-      'Deslizamento unilateral na parede: 1 × 8-10 por lado, sem arquear a lombar.',
-      'Rotação externa com elástico: 1 × 12-15 por lado, carga leve e cotovelo junto ao corpo.',
-      'Aproximação: 1-2 séries leves de supino e puxada antes do bloco 1 (não contam nas séries principais).',
+      { id: 'comp-deslizamento-parede', nome: 'Deslizamento unilateral na parede', series: 1, dose: '8-10 por lado', dica: 'Sem arquear a lombar; deslize o braço pela parede com controle.', video: 'Vt1TmUnpqFY' },
+      { id: 'comp-rotacao-externa-elastico', nome: 'Rotação externa com elástico', series: 1, dose: '12-15 por lado', dica: 'Carga leve e cotovelo junto ao corpo.', video: 'kOZr0dZGsHc', vertical: true },
     ],
+    avisos: ['Aproximação: 1-2 séries leves de supino e puxada antes do bloco 1 (não contam nas séries principais).'],
     blocos: [
       {
         nome: 'Bloco 1', foco: 'Peito / costas', voltas: 2, descanso: [90, 120],
@@ -154,8 +158,8 @@ const TREINOS = {
       },
     ],
     mobilidade: [
-      'Livro aberto (rotação torácica deitado de lado): 1 × 8 por lado. Abra o braço e gire o tórax, mantendo os joelhos juntos.',
-      'Alongamento de peitoral na parede: 1 × 30 s por lado, suave e sem dor.',
+      { id: 'comp-livro-aberto', nome: 'Livro aberto (rotação torácica deitado de lado)', series: 1, dose: '8 por lado', dica: 'Abra o braço e gire o tórax, mantendo os joelhos juntos.', video: 'rDviWORCWEw' },
+      { id: 'comp-along-peitoral-parede', nome: 'Alongamento de peitoral na parede', series: 1, dose: '30 s por lado', dica: 'Suave e sem dor.', video: '6Be-s3RwVp4' },
     ],
     cardioFinal: {
       titulo: 'Cardio final opcional · 15 min',
@@ -172,7 +176,7 @@ const TREINOS = {
     blocos: [
       terraRomeno('Joelhos levemente flexionados; leve o quadril para trás, barra junto às pernas. Pare antes de perder a coluna estável.'),
       {
-        nome: 'Quadríceps', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [90, 120],
+        nome: 'Bloco 2', foco: 'Quadríceps', voltas: 2, descanso: [90, 120],
         exercicios: [
           { id: 'b1-leg-press-45', grupo: 'Quadríceps', nome: 'Leg press 45°', carga: 'total', reps: [10, 12],
             video: 'waAxlYvtCcI',
@@ -186,7 +190,7 @@ const TREINOS = {
         ],
       },
       {
-        nome: 'Posteriores', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [60, 90],
+        nome: 'Bloco 3', foco: 'Posteriores', voltas: 2, descanso: [60, 90],
         exercicios: [
           { id: 'b1-cadeira-flexora', grupo: 'Posteriores', nome: 'Cadeira flexora bilateral', carga: 'total', reps: [10, 12],
             video: 'rdZS_kgnjZs',
@@ -197,7 +201,7 @@ const TREINOS = {
         ],
       },
       {
-        nome: 'Glúteos', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [60, 90],
+        nome: 'Bloco 4', foco: 'Glúteos', voltas: 2, descanso: [60, 90],
         exercicios: [
           { id: 'b1-hip-thrust', grupo: 'Glúteos', nome: 'Elevação pélvica com barra (hip thrust)', carga: 'total', reps: [10, 12],
             video: 'vvIc6wdDyTc',
@@ -208,7 +212,7 @@ const TREINOS = {
         ],
       },
       {
-        nome: 'Panturrilhas', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [45, 60],
+        nome: 'Bloco 5', foco: 'Panturrilhas', voltas: 2, descanso: [45, 60],
         exercicios: [
           { id: 'b1-panturrilha-pe-maquina', grupo: 'Panturrilhas', nome: 'Panturrilha em pé na máquina', carga: 'total', reps: [12, 15],
             video: '4_bpk2pfB8A',
@@ -220,12 +224,12 @@ const TREINOS = {
       },
     ],
     core: [
-      'Prancha frontal: 2 × 20-30 s, tronco alinhado e respirando.',
-      'Dead bug: 2 × 8 por lado; estenda braço e perna opostos sem arquear a lombar. Descanse 30-45 s entre séries.',
+      { id: 'comp-prancha-frontal', nome: 'Prancha frontal', series: 2, dose: '20-30 s', dica: 'Tronco alinhado e respirando.', video: 'jh0z3gbljUM' },
+      { id: 'comp-dead-bug', nome: 'Dead bug', series: 2, dose: '8 por lado', dica: 'Estenda braço e perna opostos sem arquear a lombar. Descanse 30-45 s entre séries.', video: 'pxql0kTdmEs' },
     ],
     mobilidade: [
-      'Mobilidade de tornozelo na parede: 1 × 10 por lado, calcanhar apoiado.',
-      'Flexores do quadril em meio-ajoelhado: 1 × 30 s por lado; use acolchoamento. Se apoiar o joelho incomodar, faça em pé, em passada.',
+      { id: 'comp-mob-tornozelo-parede', nome: 'Mobilidade de tornozelo na parede', series: 1, dose: '10 por lado', dica: 'Leve o joelho em direção à parede com o calcanhar apoiado.', video: 'ALzS-jz5DZs', vertical: true },
+      { id: 'comp-flexores-quadril', nome: 'Alongamento de flexores do quadril (meio-ajoelhado)', series: 1, dose: '30 s por lado', dica: 'Use acolchoamento. Se apoiar o joelho incomodar, faça em pé, em passada.', video: 'QC-RD9zvUEE', vertical: true },
     ],
   },
 
@@ -233,9 +237,9 @@ const TREINOS = {
     ...BASE_A,
     titulo: 'Treino A2',
     preparacao: [
-      'Flexão escapular na parede: 1 × 10; braços estendidos, aproxime e afaste o peito movendo as escápulas, sem dobrar os cotovelos.',
-      APROXIMACAO_A,
+      { id: 'comp-flexao-escapular-parede', nome: 'Flexão escapular na parede', series: 1, dose: '10', dica: 'Braços estendidos; aproxime e afaste o peito movendo as escápulas, sem dobrar os cotovelos.', video: 'kG_IijkUNTI' },
     ],
+    avisos: [APROXIMACAO_A],
     blocos: [
       {
         nome: 'Bloco 1', foco: 'Peito / costas', voltas: 2, descanso: [90, 120],
@@ -300,8 +304,8 @@ const TREINOS = {
       },
     ],
     mobilidade: [
-      'Rotação torácica em quatro apoios: 1 × 8 por lado; mão na nuca, gire o peito sem deslocar o quadril.',
-      'Alongamento de dorsais no banco: 1 × 30 s; mãos apoiadas, leve o quadril para trás sem forçar os ombros.',
+      { id: 'comp-rotacao-toracica-4-apoios', nome: 'Rotação torácica em quatro apoios', series: 1, dose: '8 por lado', dica: 'Mão na nuca; gire o peito sem deslocar o quadril.', video: 'MR5ywKyirR0' },
+      { id: 'comp-along-dorsais-banco', nome: 'Alongamento de dorsais no banco', series: 1, dose: '30 s', dica: 'Mãos apoiadas; leve o quadril para trás sem forçar os ombros.', video: 'B40cXuhLm4Y', vertical: true },
     ],
   },
 
@@ -311,7 +315,7 @@ const TREINOS = {
     blocos: [
       terraRomeno('Joelhos levemente flexionados; leve o quadril para trás e mantenha a barra perto das pernas.'),
       {
-        nome: 'Quadríceps', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [90, 120],
+        nome: 'Bloco 2', foco: 'Quadríceps', voltas: 2, descanso: [90, 120],
         exercicios: [
           { id: 'b2-agachamento-hack', grupo: 'Quadríceps', nome: 'Agachamento hack na máquina', carga: 'total', reps: [10, 12],
             video: 'Whp712OHPl8',
@@ -325,7 +329,7 @@ const TREINOS = {
         ],
       },
       {
-        nome: 'Posteriores', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [60, 90],
+        nome: 'Bloco 3', foco: 'Posteriores', voltas: 2, descanso: [60, 90],
         exercicios: [
           { id: 'b2-flexao-joelho-pe-polia', grupo: 'Posteriores', nome: 'Flexão de joelho em pé na polia baixa', carga: 'total', reps: [12, 15], lado: 'por perna',
             video: 'B3LADRGJ0i0',
@@ -336,7 +340,7 @@ const TREINOS = {
         ],
       },
       {
-        nome: 'Glúteos', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [60, 90],
+        nome: 'Bloco 4', foco: 'Glúteos', voltas: 2, descanso: [60, 90],
         exercicios: [
           { id: 'b2-extensao-quadril-polia', grupo: 'Glúteos', nome: 'Extensão de quadril na polia baixa', carga: 'total', reps: [12, 15], lado: 'por lado',
             video: 'WUaqJWJT1_0',
@@ -347,7 +351,7 @@ const TREINOS = {
         ],
       },
       {
-        nome: 'Panturrilhas', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [45, 60],
+        nome: 'Bloco 5', foco: 'Panturrilhas', voltas: 2, descanso: [45, 60],
         exercicios: [
           { id: 'b2-panturrilha-leg-press', grupo: 'Panturrilhas', nome: 'Panturrilha no leg press 45°', carga: 'total', reps: [12, 15],
             video: 'F7_8z_7Kwks',
@@ -359,12 +363,12 @@ const TREINOS = {
       },
     ],
     core: [
-      'Pallof press na polia: 2 × 10 por lado; estenda os braços sem girar o tronco.',
-      'Bird dog: 2 × 8 por lado, em quatro apoios; estenda braço e perna opostos com o quadril nivelado. Descanso: 30-45 s.',
+      { id: 'comp-pallof-press', nome: 'Pallof press na polia', series: 2, dose: '10 por lado', dica: 'Estenda os braços sem girar o tronco.', video: '91zJZhRx2u0' },
+      { id: 'comp-bird-dog', nome: 'Bird dog', series: 2, dose: '8 por lado', dica: 'Em quatro apoios, estenda braço e perna opostos com o quadril nivelado. Descanso: 30-45 s.', video: 'Y_NGGmPH8zA' },
     ],
     mobilidade: [
-      'Equilíbrio unilateral: 2 × 20-30 s por perna, perto de apoio fixo, sem fechar os olhos.',
-      'Alongamento de posteriores deitado com faixa: 1 × 30 s por lado, joelho suavemente estendido, sem puxar até sentir dor.',
+      { id: 'comp-equilibrio-unipodal', nome: 'Equilíbrio unilateral', series: 2, dose: '20-30 s por perna', dica: 'Perto de um apoio fixo, sem fechar os olhos.', video: 'DzWX2a5Psxc' },
+      { id: 'comp-along-posteriores-faixa', nome: 'Alongamento de posteriores deitado com faixa', series: 1, dose: '30 s por lado', dica: 'Joelho suavemente estendido, sem puxar até sentir dor.', video: 'oH8NrbkSEtw' },
     ],
   },
 
@@ -372,9 +376,9 @@ const TREINOS = {
     ...BASE_A,
     titulo: 'Treino A3',
     preparacao: [
-      'Retração escapular com elástico: 1 × 12; braços à frente, abra suavemente o elástico sem elevar os ombros. Use resistência leve.',
-      APROXIMACAO_A,
+      { id: 'comp-retracao-escapular-elastico', nome: 'Retração escapular com elástico', series: 1, dose: '12', dica: 'Braços à frente; abra suavemente o elástico sem elevar os ombros. Use resistência leve.', video: '6XGUXfVKdwI' },
     ],
+    avisos: [APROXIMACAO_A],
     blocos: [
       {
         nome: 'Bloco 1', foco: 'Peito / costas', voltas: 2, descanso: [90, 120],
@@ -439,8 +443,8 @@ const TREINOS = {
       },
     ],
     mobilidade: [
-      'Extensão torácica sobre o encosto: 1 × 8, sentado; apoie o meio das costas e estenda suavemente sem forçar a lombar.',
-      'Alongamento posterior do ombro: 1 × 30 s por lado; traga o braço à frente do peito, sem puxar com força.',
+      { id: 'comp-extensao-toracica-cadeira', nome: 'Extensão torácica sobre o encosto', series: 1, dose: '8', dica: 'Sentado; apoie o meio das costas e estenda suavemente sem forçar a lombar.', video: 'spRD9ZVJjFI' },
+      { id: 'comp-along-posterior-ombro', nome: 'Alongamento posterior do ombro', series: 1, dose: '30 s por lado', dica: 'Traga o braço à frente do peito, sem puxar com força.', video: 'NDm433jzT3w' },
     ],
   },
 
@@ -450,7 +454,7 @@ const TREINOS = {
     blocos: [
       terraRomeno('Leve o quadril para trás; barra próxima às pernas e coluna estável, sem buscar o chão.'),
       {
-        nome: 'Quadríceps', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [90, 120],
+        nome: 'Bloco 2', foco: 'Quadríceps', voltas: 2, descanso: [90, 120],
         exercicios: [
           { id: 'b3-agachamento-smith', grupo: 'Quadríceps', nome: 'Agachamento no Smith', carga: 'total', reps: [10, 12],
             video: '4vA727LveHQ',
@@ -464,7 +468,7 @@ const TREINOS = {
         ],
       },
       {
-        nome: 'Posteriores', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [60, 90],
+        nome: 'Bloco 3', foco: 'Posteriores', voltas: 2, descanso: [60, 90],
         exercicios: [
           { id: 'b3-mesa-flexora-unilateral', grupo: 'Posteriores', nome: 'Mesa flexora unilateral', carga: 'total', reps: [10, 12], lado: 'por perna',
             video: 'AxhqsWRQfKc',
@@ -475,7 +479,7 @@ const TREINOS = {
         ],
       },
       {
-        nome: 'Glúteos', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [60, 90],
+        nome: 'Bloco 4', foco: 'Glúteos', voltas: 2, descanso: [60, 90],
         exercicios: [
           { id: 'b3-ponte-unilateral', grupo: 'Glúteos', nome: 'Ponte de glúteo unilateral no solo', carga: 'corporal', reps: [10, 12], lado: 'por perna',
             video: 'qAYFKJsnqEM',
@@ -486,7 +490,7 @@ const TREINOS = {
         ],
       },
       {
-        nome: 'Panturrilhas', foco: '2 séries por exercício', modo: 'series', voltas: 2, descanso: [45, 60],
+        nome: 'Bloco 5', foco: 'Panturrilhas', voltas: 2, descanso: [45, 60],
         exercicios: [
           { id: 'b3-panturrilha-pe-smith', grupo: 'Panturrilhas', nome: 'Panturrilha em pé no Smith', carga: 'total', reps: [12, 15],
             video: 'ybjCv9Zek6I',
@@ -498,12 +502,12 @@ const TREINOS = {
       },
     ],
     core: [
-      'Prancha lateral com joelhos apoiados: 2 × 20-30 s por lado; quadril alinhado, sem prender a respiração.',
-      'Abdominal reverso: 2 × 10; aproxime os joelhos elevando levemente a pelve, sem embalo. Descanso: 30-45 s.',
+      { id: 'comp-prancha-lateral-joelhos', nome: 'Prancha lateral com joelhos apoiados', series: 2, dose: '20-30 s por lado', dica: 'Quadril alinhado, sem prender a respiração.', video: 'gnSzKBEoPGo' },
+      { id: 'comp-abdominal-reverso', nome: 'Abdominal reverso', series: 2, dose: '10', dica: 'Aproxime os joelhos elevando levemente a pelve, sem embalo. Descanso: 30-45 s.', video: 'XY8KzdDcMFg' },
     ],
     mobilidade: [
-      'Mobilidade de quadril sentado (90/90): 1 × 6 alternâncias lentas, com mãos apoiadas; não force os joelhos.',
-      'Alongamento de panturrilha na parede: 1 × 30 s por lado, calcanhar apoiado e pé apontado para a frente.',
+      { id: 'comp-mob-quadril-90-90', nome: 'Mobilidade de quadril sentado (90/90)', series: 1, dose: '6 alternâncias lentas', dica: 'Com as mãos apoiadas; não force os joelhos.', video: 'EqT_XhsbiCY' },
+      { id: 'comp-along-panturrilha-parede', nome: 'Alongamento de panturrilha na parede', series: 1, dose: '30 s por lado', dica: 'Calcanhar apoiado e pé apontado para a frente.', video: 'ltH2dnWUnPY' },
     ],
   },
 };

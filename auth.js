@@ -11,7 +11,7 @@ const SESSAO_KEY = 'meutreino:sessao';
 const ITERACOES = 150000;
 const DEMO = { id: 'demo', login: 'admin', senha: 'admin', nome: 'Demonstração' };
 
-let modoLogin = 'entrar'; // 'entrar' | 'criar'
+let modoLogin = 'entrar'; // 'entrar' | 'criar' | 'redefinir'
 let falhas = 0, bloqueadoAte = 0;
 
 // ---------- Contas ----------
@@ -26,6 +26,13 @@ function normLogin(s) {
   const t = (s || '').trim().toLowerCase();
   return /^[\d.\-\s]+$/.test(t) ? t.replace(/\D/g, '') : t;
 }
+const normEmail = (s) => (s || '').trim().toLowerCase();
+const emailValido = (s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
+function mascararEmail(e) {
+  const [u, d] = (e || '').split('@');
+  return d ? `${u.slice(0, 2)}***@${d}` : '';
+}
+
 function mascararLogin(login) {
   return /^\d{11}$/.test(login) ? `${login.slice(0, 3)}.***.***-${login.slice(9)}` : login;
 }
@@ -75,13 +82,28 @@ function sair() {
 // ---------- Tela de login ----------
 function telaLogin() {
   const criando = modoLogin === 'criar';
+  const subtitulo = { criar: 'Crie o seu acesso neste celular', redefinir: 'Redefina a sua senha', entrar: 'Entre para acessar seus treinos' }[modoLogin];
   const topo = `<div class="login-topo"><img src="icons/icon-192.png" alt="" class="login-logo"><h1>Meu Treino</h1>
-    <p class="muted small">${criando ? 'Crie o seu acesso neste celular' : 'Entre para acessar seus treinos'}</p></div>`;
+    <p class="muted small">${subtitulo}</p></div>`;
+  if (modoLogin === 'redefinir') {
+    return `<div class="login">${topo}
+      <form class="card form" data-form="redefinir" autocomplete="on">
+        <label>CPF ou usuário<input class="input-texto" name="login" autocomplete="username" autocapitalize="none" required></label>
+        <label>E-mail da conta<input class="input-texto" type="email" name="email" autocomplete="email" autocapitalize="none" required></label>
+        <p class="muted small" style="margin:0">Se a conta ainda não tiver e-mail, este passa a ser o e-mail cadastrado.</p>
+        <label>Nova senha (mínimo 6 caracteres)<input class="input-texto" type="password" name="senha" autocomplete="new-password" required></label>
+        <label>Confirme a nova senha<input class="input-texto" type="password" name="senha2" autocomplete="new-password" required></label>
+        <p class="login-erro small" id="login-erro" hidden></p>
+        <button class="btn" type="submit">Redefinir senha e entrar</button>
+      </form>
+      <button class="btn sec" data-acao="login-modo" data-modo="entrar">Voltar ao login</button></div>`;
+  }
   if (criando) {
     return `<div class="login">${topo}
       <form class="card form" data-form="criar" autocomplete="on">
         <label>Seu nome<input class="input-texto" name="nome" autocomplete="name" required></label>
         <label>CPF ou usuário<input class="input-texto" name="login" autocomplete="username" autocapitalize="none" required></label>
+        <label>E-mail (para redefinir a senha)<input class="input-texto" type="email" name="email" autocomplete="email" autocapitalize="none" required></label>
         <label>Senha (mínimo 6 caracteres)<input class="input-texto" type="password" name="senha" autocomplete="new-password" required></label>
         <label>Confirme a senha<input class="input-texto" type="password" name="senha2" autocomplete="new-password" required></label>
         ${localStorage.getItem(CHAVE_ANTIGA) ? '<p class="muted small">Os treinos já registrados neste celular passarão para este perfil.</p>' : ''}
@@ -96,6 +118,7 @@ function telaLogin() {
         <button type="button" class="btn-mini" data-acao="ver-senha" aria-label="Mostrar senha">👁</button></div></label>
       <p class="login-erro small" id="login-erro" hidden></p>
       <button class="btn" type="submit">Entrar</button>
+      <button type="button" class="link-btn" data-acao="login-modo" data-modo="redefinir">Esqueci minha senha</button>
     </form>
     ${temDono() ? '' : `<div class="card small">Primeiro acesso neste celular?
       <button class="btn sec" data-acao="login-modo" data-modo="criar">Criar meu acesso</button></div>`}</div>`;
@@ -125,13 +148,15 @@ async function enviarLogin(form) {
 
 async function enviarCriacao(form, { dono }) {
   const nome = form.nome.value.trim(), login = normLogin(form.login.value), senha = form.senha.value;
+  const email = normEmail(form.email?.value);
   if (!nome || !login) return toast('Preencha nome e login');
+  if (!emailValido(email)) return toast('Informe um e-mail válido');
   if (login === DEMO.login) return toast('Este login é reservado para a demonstração');
   if (senha.length < 6) return toast('A senha precisa ter pelo menos 6 caracteres');
   if (senha !== form.senha2.value) return toast('As senhas não conferem');
   const contas = lerContas();
   if (contas.some((c) => c.login === login)) return toast('Já existe um perfil com esse login');
-  const conta = { id: uid(), login, nome, dono, ...(await novaCredencial(senha)) };
+  const conta = { id: uid(), login, nome, email, dono, ...(await novaCredencial(senha)) };
   contas.push(conta);
   gravarContas(contas);
   // O primeiro perfil (dono) herda os dados de antes do login
@@ -140,15 +165,42 @@ async function enviarCriacao(form, { dono }) {
   return conta;
 }
 
+// Redefinição de senha neste aparelho: confere login + e-mail cadastrado.
+// Conta sem e-mail (criada antes desta opção) recebe o e-mail informado aqui.
+async function enviarRedefinicao(form) {
+  if (Date.now() < bloqueadoAte) return erroLogin(`Muitas tentativas. Aguarde ${Math.ceil((bloqueadoAte - Date.now()) / 1000)} s.`);
+  const login = normLogin(form.login.value), email = normEmail(form.email.value), senha = form.senha.value;
+  if (!emailValido(email)) return erroLogin('Informe um e-mail válido.');
+  if (senha.length < 6) return erroLogin('A senha precisa ter pelo menos 6 caracteres.');
+  if (senha !== form.senha2.value) return erroLogin('As senhas não conferem.');
+  const contas = lerContas();
+  const conta = contas.find((c) => c.login === login && !c.demo);
+  if (!conta || (conta.email && conta.email !== email)) {
+    falhas++;
+    if (falhas >= 5) { bloqueadoAte = Date.now() + 30000; falhas = 0; }
+    return erroLogin('Login ou e-mail não conferem.');
+  }
+  conta.email ||= email;
+  Object.assign(conta, await novaCredencial(senha));
+  gravarContas(contas);
+  toast('Senha redefinida');
+  entrar(conta);
+}
+
 // ---------- Ajustes: conta e perfis ----------
 function cartaoConta() {
   const c = contaAtual;
   const outros = c.dono ? lerContas().filter((x) => x.id !== c.id) : [];
   return `<div class="card"><h2>Conta</h2>
-    <div class="linha entre"><div><b>${esc(c.nome)}</b><div class="muted small">${esc(mascararLogin(c.login))}${c.dono ? ' · dono' : ''}${c.demo ? ' · demonstração' : ''}</div></div>
+    <div class="linha entre"><div><b>${esc(c.nome)}</b><div class="muted small">${esc(mascararLogin(c.login))}${c.email ? ` · ${esc(mascararEmail(c.email))}` : ''}${c.dono ? ' · dono' : ''}${c.demo ? ' · demonstração' : ''}</div></div>
       <button class="btn-mini" data-acao="sair">Sair</button></div>
     ${c.demo ? `<p class="muted small" style="margin-top:10px">Perfil para mostrar o app. Tem banco próprio: nada aqui afeta os outros perfis.</p>
       <button class="btn sec" data-acao="demo-gerar">Carregar treinos de exemplo</button>` : `
+    <form class="form" data-form="email" style="margin-top:10px">
+      <label>E-mail para redefinir a senha<div class="linha"><input class="input-texto cresce" type="email" name="email" value="${esc(c.email || '')}" placeholder="seu@email.com" autocapitalize="none">
+        <button class="btn-mini" type="submit">Salvar</button></div></label>
+      ${c.email ? '' : '<p class="small" style="color:var(--accent);margin:0">Cadastre um e-mail para poder redefinir a senha.</p>'}
+    </form>
     <details style="margin-top:10px"><summary class="small muted">Trocar senha ▾</summary>
       <form class="form" data-form="senha">
         <label>Senha atual<input class="input-texto" type="password" name="atual" autocomplete="current-password" required></label>
@@ -164,6 +216,7 @@ function cartaoConta() {
         <form class="form" data-form="novo-perfil">
           <label>Nome<input class="input-texto" name="nome" required></label>
           <label>CPF ou usuário<input class="input-texto" name="login" autocapitalize="none" required></label>
+          <label>E-mail<input class="input-texto" type="email" name="email" autocapitalize="none" required></label>
           <label>Senha (mínimo 6 caracteres)<input class="input-texto" type="password" name="senha" autocomplete="new-password" required></label>
           <label>Confirme a senha<input class="input-texto" type="password" name="senha2" autocomplete="new-password" required></label>
           <button class="btn" type="submit">Criar perfil</button>
@@ -226,6 +279,15 @@ document.addEventListener('submit', async (e) => {
   e.preventDefault();
   const tipo = form.dataset.form;
   if (tipo === 'entrar') return enviarLogin(form);
+  if (tipo === 'redefinir') return enviarRedefinicao(form);
+  if (tipo === 'email' && contaAtual && !contaAtual.demo) {
+    const email = normEmail(form.email.value);
+    if (!emailValido(email)) return toast('Informe um e-mail válido');
+    const contas = lerContas();
+    const conta = contas.find((c) => c.id === contaAtual.id);
+    conta.email = email; gravarContas(contas); contaAtual = conta;
+    toast('E-mail salvo'); return render();
+  }
   if (tipo === 'criar') {
     const conta = await enviarCriacao(form, { dono: true });
     if (conta) { toast(`Bem-vindo, ${conta.nome.split(' ')[0]}!`); entrar(conta); }

@@ -49,7 +49,8 @@ const opcoes = (lista, sel) => lista.map(([v, t]) => `<option value="${esc(v)}" 
 
 // ---------- Lista de fichas ----------
 function telaTreinos() {
-  let h = `<h1>Treinos</h1><p class="muted small">Consulte cada ficha ou toque em Editar para trocar exercícios, ajustar séries, descansos e a ordem.</p>`;
+  let h = `<h1>Treinos</h1><p class="muted small">Consulte cada ficha ou toque em Editar para trocar exercícios, ajustar séries, descansos e a ordem.</p>
+    <a class="btn sec" href="#/catalogo">Catálogo de exercícios (${CATALOGO.length})</a>`;
   for (const f of FICHAS) {
     const t = fichaDe(f);
     const c = contarSeries(t, {});
@@ -74,7 +75,7 @@ function telaFicha(f, args) {
     h += `<div class="linha" style="gap:8px"><a class="btn sec" href="#/ficha/${f}/editar">✏️ Editar ficha</a>
       <button class="btn" data-acao="iniciar" data-ficha="${f}">Iniciar ${f}</button></div>`;
     h += `<div class="card"><h2>${esc(t.cardioInicial.titulo)}</h2><p class="small muted">${esc(t.cardioInicial.texto)}</p></div>
-      <div class="card"><h2>${esc(t.tituloPreparacao || 'Preparação')}</h2>${t.preparacao.map((p) => `<p class="small">• ${esc(p)}</p>`).join('')}</div>`;
+      ${cartaoSecaoComp(t.tituloPreparacao || 'Preparação', 'prep', t.preparacao, null, t.avisos || [])}`;
     let n = 0;
     for (const b of t.blocos) {
       h += `<div class="card"><h2>${esc(b.nome)} <span class="muted small">· ${esc(b.foco)}</span></h2><p class="muted small">${metaBloco(b)}</p>`;
@@ -88,8 +89,8 @@ function telaFicha(f, args) {
       }
       h += `</div>`;
     }
-    if (t.core && t.core.length) h += `<div class="card"><h2>Core</h2>${t.core.map((p) => `<p class="small">• ${esc(p)}</p>`).join('')}</div>`;
-    h += `<div class="card"><h2>${esc(t.tituloMobilidade || 'Mobilidade')}</h2>${t.mobilidade.map((p) => `<p class="small">• ${esc(p)}</p>`).join('')}</div>
+    h += cartaoSecaoComp('Core', 'core', t.core || [], null);
+    h += `${cartaoSecaoComp(t.tituloMobilidade || 'Mobilidade', 'mob', t.mobilidade, null)}
       <div class="card"><h2>${esc(t.cardioFinal.titulo)}</h2><p class="small muted">${esc(t.cardioFinal.texto)}</p></div>
       <div class="card"><h2>Carga e progressão</h2><p class="small muted">${esc(t.progressao)}</p></div>`;
     return h;
@@ -111,16 +112,33 @@ function telaFicha(f, args) {
       h += `<div class="ed-ex"><span class="num-ex">${ei + 1}</span>
         <div class="cresce"><b class="small">${esc(ex.nome)}</b><div class="muted small">${esc(ex.grupo)} · ${esc(faixaReps(ex))} · ${esc(ROTULO_CARGA[ex.carga] || '')}</div></div>
         <div class="ed-acoes">
+          <button data-acao="ir" data-href="#/trocar/ficha/${f}/${bi}/${ei}" aria-label="Trocar por equivalente">⇄</button>
           <button data-acao="ed-ex-mover" data-f="${f}" data-bi="${bi}" data-ei="${ei}" data-dir="-1" ${ei === 0 ? 'disabled' : ''} aria-label="Subir">↑</button>
           <button data-acao="ed-ex-mover" data-f="${f}" data-bi="${bi}" data-ei="${ei}" data-dir="1" ${ei === b.exercicios.length - 1 ? 'disabled' : ''} aria-label="Descer">↓</button>
           <button data-acao="ir" data-href="#/editar-ex/${f}/${bi}/${ei}" aria-label="Editar">✎</button>
           <button class="perigo" data-acao="ed-ex-remover" data-f="${f}" data-bi="${bi}" data-ei="${ei}" aria-label="Remover">🗑</button>
         </div></div>`;
     });
-    h += `<a class="btn-add" href="#/editar-ex/${f}/${bi}/novo">+ Adicionar exercício</a></div>`;
+    h += `<a class="btn-add" href="#/escolher/${f}/${bi}">+ Adicionar exercício</a></div>`;
   });
-  h += `<a class="btn-add" href="#/editar-bloco/${f}/novo">+ Adicionar bloco</a>
-    <a class="btn sec" href="#/editar-textos/${f}">Cardio, preparação, core e mobilidade</a>
+  h += `<a class="btn-add" href="#/editar-bloco/${f}/novo">+ Adicionar bloco</a>`;
+  for (const [campo, titulo] of SECOES_COMP) {
+    const lista = (campo === 'preparacao' ? t.preparacao : campo === 'core' ? t.core : t.mobilidade) || [];
+    const tit = campo === 'preparacao' ? t.tituloPreparacao || titulo : campo === 'mobilidade' ? t.tituloMobilidade || titulo : titulo;
+    h += `<div class="card ed-bloco"><h2>${esc(tit)}</h2>`;
+    lista.forEach((c, i) => {
+      h += `<div class="ed-ex"><span class="num-ex">${i + 1}</span>
+        <div class="cresce"><b class="small">${esc(c.nome)}</b><div class="muted small">${c.series || 1} × ${esc(c.dose || '')}${c.video ? ' · ▶ vídeo' : ''}</div></div>
+        <div class="ed-acoes">
+          <button data-acao="ed-comp-mover" data-f="${f}" data-campo="${campo}" data-i="${i}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Subir">↑</button>
+          <button data-acao="ed-comp-mover" data-f="${f}" data-campo="${campo}" data-i="${i}" data-dir="1" ${i === lista.length - 1 ? 'disabled' : ''} aria-label="Descer">↓</button>
+          <button data-acao="ir" data-href="#/editar-comp/${f}/${campo}/${i}" aria-label="Editar">✎</button>
+          <button class="perigo" data-acao="ed-comp-remover" data-f="${f}" data-campo="${campo}" data-i="${i}" aria-label="Remover">🗑</button>
+        </div></div>`;
+    });
+    h += `<a class="btn-add" href="#/editar-comp/${f}/${campo}/novo">+ Adicionar à ${esc(tit.toLowerCase())}</a></div>`;
+  }
+  h += `<a class="btn sec" href="#/editar-textos/${f}">Cardio, avisos e textos da ficha</a>
     ${foiEditada(f) ? `<button class="btn perigo" data-acao="ed-restaurar" data-f="${f}">Restaurar ficha original</button>` : ''}
     <a class="btn" href="#/ficha/${f}">Concluir edição</a>`;
   return h;
@@ -166,7 +184,7 @@ function telaEditarEx(f, args) {
       <a class="btn sec" href="#/ficha/${f}/editar">Cancelar</a>
       <button class="btn" data-acao="ed-salvar-ex" data-f="${f}" data-bi="${bi}" data-ei="${ei}" data-modo="${novo ? 'novo' : substituir ? 'substituir' : 'editar'}">Salvar</button>
     </div>
-    ${!novo && !substituir ? `<a class="btn sec" href="#/editar-ex/${f}/${bi}/${ei}/substituir">⇄ Trocar por outro exercício</a>
+    ${!novo && !substituir ? `<a class="btn sec" href="#/trocar/ficha/${f}/${bi}/${ei}">⇄ Trocar por outro exercício</a>
       <button class="btn perigo" data-acao="ed-ex-remover" data-f="${f}" data-bi="${bi}" data-ei="${ei}">Remover da ficha</button>` : ''}`;
 }
 
@@ -255,16 +273,14 @@ function telaEditarTextos(f) {
   const t = fichaDe(f);
   const linhas = (arr) => esc((arr || []).join('\n'));
   return `<a href="#/ficha/${f}/editar" class="small">‹ ${esc(t.titulo)}</a><h1>Textos da ficha</h1>
-    <p class="muted small">Nas listas, escreva um item por linha.</p>
+    <p class="muted small">Os exercícios de preparação, core e mobilidade são editados na própria ficha. Aqui ficam os textos.</p>
     <div class="card form">
       <label>Como executar<textarea id="x-instrucoes" rows="3">${esc(t.instrucoes)}</textarea></label>
       <label>Cardio inicial: título<input class="input-texto" id="x-ci-titulo" value="${esc(t.cardioInicial.titulo)}"></label>
       <label>Cardio inicial: descrição<textarea id="x-ci-texto" rows="2">${esc(t.cardioInicial.texto)}</textarea></label>
       <label>Preparação: título<input class="input-texto" id="x-prep-titulo" value="${esc(t.tituloPreparacao || 'Preparação')}"></label>
-      <label>Preparação: itens<textarea id="x-prep" rows="4">${linhas(t.preparacao)}</textarea></label>
-      <label>Core: itens (deixe vazio se não houver)<textarea id="x-core" rows="3">${linhas(t.core)}</textarea></label>
+      <label>Avisos da preparação (um por linha)<textarea id="x-avisos" rows="4">${linhas(t.avisos)}</textarea></label>
       <label>Mobilidade: título<input class="input-texto" id="x-mob-titulo" value="${esc(t.tituloMobilidade || 'Mobilidade')}"></label>
-      <label>Mobilidade: itens<textarea id="x-mob" rows="3">${linhas(t.mobilidade)}</textarea></label>
       <label>Cardio final: título<input class="input-texto" id="x-cf-titulo" value="${esc(t.cardioFinal.titulo)}"></label>
       <label>Cardio final: descrição<textarea id="x-cf-texto" rows="2">${esc(t.cardioFinal.texto)}</textarea></label>
       <label>Carga e progressão<textarea id="x-prog" rows="3">${esc(t.progressao)}</textarea></label>
@@ -283,21 +299,57 @@ function salvarTextos(el) {
   t.instrucoes = val('x-instrucoes');
   t.cardioInicial = { titulo: val('x-ci-titulo'), texto: val('x-ci-texto') };
   t.tituloPreparacao = val('x-prep-titulo');
-  t.preparacao = lista('x-prep');
-  const core = lista('x-core');
-  if (core.length) t.core = core; else delete t.core;
+  t.avisos = lista('x-avisos');
   t.tituloMobilidade = val('x-mob-titulo');
-  t.mobilidade = lista('x-mob');
   t.cardioFinal = { titulo: val('x-cf-titulo'), texto: val('x-cf-texto') };
   t.progressao = val('x-prog');
-  // Sessão em andamento desta ficha: ajusta as caixinhas às novas listas
-  if (db.ativa && db.ativa.treino === f) {
-    const c = db.ativa.checks;
-    c.prep = t.preparacao.map((_, i) => !!c.prep?.[i]);
-    c.core = (t.core || []).map((_, i) => !!c.core?.[i]);
-    c.mob = t.mobilidade.map((_, i) => !!c.mob?.[i]);
-  }
   salvar(); toast('Textos salvos');
+  location.hash = `#/ficha/${f}/editar`;
+}
+
+// ---------- Exercício complementar (preparação, core, mobilidade) ----------
+const SECOES_COMP = [['preparacao', 'Preparação'], ['core', 'Core'], ['mobilidade', 'Mobilidade']];
+
+// args: [f, campo, i | 'novo']
+function telaEditarComp(f, args) {
+  const t = fichaDe(f), campo = args[1], novo = args[2] === 'novo';
+  if (!SECOES_COMP.some(([c]) => c === campo)) return `<div class="vazio">Seção não encontrada.</div>`;
+  const c = novo ? { nome: '', series: 1, dose: '', dica: '' } : (t[campo] || [])[+args[2]];
+  if (!c) return `<div class="vazio">Exercício não encontrado.</div>`;
+  const urlVideo = c.video ? (c.vertical ? `https://youtube.com/shorts/${c.video}` : `https://youtu.be/${c.video}`) : '';
+  return `<a href="#/ficha/${f}/editar" class="small">‹ ${esc(t.titulo)}</a><h1>${novo ? 'Novo exercício' : 'Editar exercício'}</h1>
+    <p class="muted small">${esc(SECOES_COMP.find(([x]) => x === campo)[1])}</p>
+    <div class="card form">
+      <label>Nome<input class="input-texto" id="c-nome" value="${esc(c.nome)}" placeholder="ex.: Prancha frontal"></label>
+      <div class="dupla">
+        <label>Séries<input class="input-texto" id="c-series" inputmode="numeric" value="${c.series || 1}"></label>
+        <label>Por série<input class="input-texto" id="c-dose" value="${esc(c.dose || '')}" placeholder="ex.: 30 s, 10 por lado"></label>
+      </div>
+      <label>Dica de execução<textarea id="c-dica" rows="3">${esc(c.dica || '')}</textarea></label>
+      <label>Vídeo (link do YouTube, opcional)<input class="input-texto" id="f-video" value="${esc(urlVideo)}" placeholder="Cole aqui o link do vídeo"></label>
+      <div id="video-prev">${c.video ? `<img class="thumb-mini" src="https://i.ytimg.com/vi/${esc(c.video)}/hqdefault.jpg" alt="">` : ''}</div>
+    </div>
+    <div class="barra-fixa">
+      <a class="btn sec" href="#/ficha/${f}/editar">Cancelar</a>
+      <button class="btn" data-acao="ed-salvar-comp" data-f="${f}" data-campo="${campo}" data-i="${novo ? -1 : args[2]}">Salvar</button>
+    </div>`;
+}
+
+function salvarComp(el) {
+  const { f, campo } = el.dataset, i = +el.dataset.i;
+  const val = (id) => ($(`#${id}`)?.value || '').trim();
+  const series = parseInt(val('c-series'), 10);
+  if (!val('c-nome')) return toast('Dê um nome ao exercício');
+  if (!(series >= 1 && series <= 10)) return toast('Séries: de 1 a 10');
+  const link = val('f-video'), video = link ? idVideo(link) : null;
+  if (link && !video) return toast('Link de vídeo não reconhecido');
+  const t = editavel(f);
+  const lista = (t[campo] ??= []);
+  const antigo = i >= 0 ? lista[i] : null;
+  const c = { id: antigo ? antigo.id : `comp-${uid()}`, nome: val('c-nome'), series, dose: val('c-dose'), dica: val('c-dica') };
+  if (video) { c.video = video; if (ehShort(link) || (antigo?.vertical && antigo.video === video)) c.vertical = true; }
+  if (antigo) lista[i] = c; else lista.push(c);
+  salvar(); toast('Exercício salvo');
   location.hash = `#/ficha/${f}/editar`;
 }
 
@@ -333,6 +385,15 @@ document.addEventListener('click', (e) => {
   } else if (acao === 'ed-salvar-ex') salvarExercicio(el);
   else if (acao === 'ed-salvar-bloco') salvarBloco(el);
   else if (acao === 'ed-salvar-textos') salvarTextos(el);
+  else if (acao === 'ed-salvar-comp') salvarComp(el);
+  else if (acao === 'ed-comp-mover') {
+    const lista = editavel(f)[el.dataset.campo]; const i = +el.dataset.i;
+    trocar(lista, i, i + dir); salvar(); render();
+  } else if (acao === 'ed-comp-remover') {
+    const lista = fichaDe(f)[el.dataset.campo]; const i = +el.dataset.i;
+    if (!confirm(`Remover "${lista[i].nome}" da ficha ${f}?`)) return;
+    editavel(f)[el.dataset.campo].splice(i, 1); salvar(); render(); toast('Exercício removido');
+  }
   else if (acao === 'ed-restaurar') {
     if (!confirm(`Voltar a ficha ${f} para a versão original? Todas as alterações feitas nela serão desfeitas. O histórico de treinos não é afetado.`)) return;
     delete db.fichas[f]; salvar(); toast('Ficha restaurada'); location.hash = `#/ficha/${f}`;

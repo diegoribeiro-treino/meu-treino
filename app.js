@@ -36,6 +36,9 @@ function abrirConta(conta) {
   contaAtual = conta;
   db = carregar(conta.id);
   fichaEscolhida = null;
+  migrarFichas();
+  if (conta.dono) importarHistorico(); // importacao.js
+  salvar();
 }
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
@@ -70,17 +73,68 @@ const fichaDe = (id) => (db.fichas && db.fichas[id]) || TREINOS[id];
 function exInfo(id, sessao) {
   for (const f of FICHAS) { const e = exerciciosDe(fichaDe(f)).find((x) => x.id === id); if (e) return e; }
   for (const f of FICHAS) { const e = exerciciosDe(TREINOS[f]).find((x) => x.id === id); if (e) return e; }
+  const c = catalogoPorId(id);
+  if (c) return c;
   const n = sessao && sessao.nomes && sessao.nomes[id];
   return n ? { id, ...n } : { id, nome: id, grupo: '', carga: 'total', reps: [0, 0] };
 }
 
+// Blocos da sessão em andamento já com as trocas do dia (catalogo.js): o exercício escolhido
+// ocupa o lugar do original e mantém a prescrição da ficha (faixa de repetições).
+function blocosEfetivos(t, a) {
+  const trocas = (a && a.trocas) || {};
+  return t.blocos.map((b) => ({
+    ...b,
+    exercicios: b.exercicios.map((ex) => {
+      const novo = trocas[ex.id] && catalogoPorId(trocas[ex.id]);
+      return novo ? { ...novo, reps: ex.reps, slotId: ex.id } : ex;
+    }),
+  }));
+}
+
+// Séries novas de um exercício, com a carga da última vez já preenchida
+function novasSeries(ex, voltas) {
+  const ult = ultimoRegistro(ex.id);
+  return Array.from({ length: voltas }, (_, i) => {
+    const ant = ult && (ult.series[i] || ult.series[ult.series.length - 1]);
+    return { kg: ant && !SEM_CARGA(ex) ? ant.kg : '', reps: '', ok: false };
+  });
+}
+// Exercícios complementares (preparação, core, mobilidade): uma caixinha por série
+const checksComp = (lista) => (lista || []).map((c) => Array(c.series || 1).fill(false));
+
 // Garante que a sessão em andamento tem séries para todos os exercícios da ficha
-// (a ficha pode ter sido editada no meio do treino).
+// (a ficha pode ter sido editada ou um exercício trocado no meio do treino).
 function sincronizarSeries(a, t) {
-  for (const b of t.blocos) for (const ex of b.exercicios) {
-    const s = (a.series[ex.id] ??= []);
+  for (const b of blocosEfetivos(t, a)) for (const ex of b.exercicios) {
+    const s = (a.series[ex.id] ??= novasSeries(ex, b.voltas));
     while (s.length < b.voltas) s.push({ kg: s.length ? s[s.length - 1].kg : '', reps: '', ok: false });
     while (s.length > b.voltas && !s[s.length - 1].ok) s.pop();
+  }
+  for (const g of ['prep', 'core', 'mob']) {
+    const lista = t[{ prep: 'preparacao', core: 'core', mob: 'mobilidade' }[g]] || [];
+    a.checks[g] = lista.map((c, i) => {
+      const atual = a.checks[g]?.[i];
+      const marcas = Array.isArray(atual) ? atual : Array(c.series || 1).fill(!!atual); // formato antigo: um booleano
+      while (marcas.length < (c.series || 1)) marcas.push(false);
+      return marcas.slice(0, c.series || 1);
+    });
+  }
+}
+
+// Fichas copiadas no aparelho antes dos complementares com vídeo guardam textos simples.
+// Se os blocos não mudaram, a cópia é descartada e o app volta à ficha atualizada; senão os textos viram itens.
+function migrarFichas() {
+  for (const f of Object.keys(db.fichas || {})) {
+    const t = db.fichas[f];
+    const antigo = (l) => (l || []).some((x) => typeof x === 'string');
+    if (!antigo(t.preparacao) && !antigo(t.core) && !antigo(t.mobilidade)) continue;
+    if (JSON.stringify(t.blocos) === JSON.stringify(TREINOS[f].blocos)) { delete db.fichas[f]; continue; }
+    const item = (x) => (typeof x === 'string' ? { id: `comp-${uid()}`, nome: x, series: 1, dose: '', dica: '' } : x);
+    t.avisos = [...(t.avisos || []), ...(t.preparacao || []).filter((x) => typeof x === 'string' && /^Aproxima|^Joelho/.test(x))];
+    t.preparacao = (t.preparacao || []).filter((x) => !(typeof x === 'string' && /^Aproxima|^Joelho/.test(x))).map(item);
+    if (t.core) t.core = t.core.map(item);
+    t.mobilidade = (t.mobilidade || []).map(item);
   }
 }
 // Sugestão: a ficha seguinte à última feita, na ordem de FICHAS (A1 quando ainda não há treinos)
@@ -146,16 +200,13 @@ function iniciarTreino(fichaId, dataManual = null) {
   }
   const series = {}, extras = {};
   for (const b of t.blocos) for (const ex of b.exercicios) {
-    const ult = ultimoRegistro(ex.id);
-    series[ex.id] = Array.from({ length: b.voltas }, (_, i) => {
-      const ant = ult && (ult.series[i] || ult.series[ult.series.length - 1]);
-      return { kg: ant && !SEM_CARGA(ex) ? ant.kg : '', reps: '', ok: false };
-    });
+    series[ex.id] = novasSeries(ex, b.voltas);
+    const ult = ex.extra && ultimoRegistro(ex.id);
     if (ex.extra) extras[ex.id] = (ult && ult.sessao.extras && ult.sessao.extras[ex.id]) || '';
   }
   db.ativa = {
-    id: uid(), treino: fichaId, inicio: Date.now(), series, extras,
-    checks: { cardioIni: false, prep: t.preparacao.map(() => false), core: (t.core || []).map(() => false), mob: t.mobilidade.map(() => false) },
+    id: uid(), treino: fichaId, inicio: Date.now(), series, extras, trocas: {},
+    checks: { cardioIni: false, prep: checksComp(t.preparacao), core: checksComp(t.core), mob: checksComp(t.mobilidade) },
     descanso: null, dataManual,
   };
   salvar();
@@ -227,11 +278,19 @@ function tick() {
     estado = 'passou'; tempo = '+' + fmtSeg(passado - d.max); info = 'Descanso máximo atingido';
     if (!avisos.max) { avisos.max = true; bip(3); }
   }
+  // A barra é montada uma vez e depois só os textos mudam: recriar os botões a cada segundo
+  // fazia o toque cair num botão já descartado (o ✕ e o +15s não respondiam).
+  if (!barra.dataset.montada) {
+    barra.innerHTML = `<div class="tempo" id="d-tempo"></div>
+      <div class="cresce small"><b id="d-rotulo"></b><div class="muted" id="d-info"></div></div>
+      <button type="button" class="btn-mini" data-acao="descanso-mais">+15s</button>
+      <button type="button" class="btn-mini btn-fechar" data-acao="descanso-fim" aria-label="Fechar descanso">✕</button>`;
+    barra.dataset.montada = '1';
+  }
   barra.className = 'descanso ' + estado;
-  barra.innerHTML = `<div class="tempo">${tempo}</div>
-    <div class="cresce small"><b>${esc(d.rotulo)}</b><div class="muted">${info}</div></div>
-    <button class="btn-mini" data-acao="descanso-mais">+15s</button>
-    <button class="btn-mini" data-acao="descanso-fim">✕</button>`;
+  $('#d-tempo').textContent = tempo;
+  $('#d-rotulo').textContent = d.rotulo;
+  $('#d-info').textContent = info;
   barra.hidden = false;
   document.body.classList.add('com-descanso');
 }
@@ -243,11 +302,12 @@ function rotaAtual() {
   return { pag, arg: args[0], args };
 }
 
-// As telas de editor.js (Treinos) e relatorios.js (Relatórios) são carregadas antes deste arquivo
+// As telas de editor.js (Treinos), catalogo.js, relatorios.js e auth.js são carregadas antes deste arquivo
 const telas = {
   hoje: telaHoje, registrar: telaRegistrar, treino: telaTreino, finalizar: telaFinalizar, historico: telaHistorico, sessao: telaSessao,
   progresso: telaProgresso, exercicio: telaExercicio, ajustes: telaAjustes,
   treinos: telaTreinos, ficha: telaFicha, 'editar-ex': telaEditarEx, 'editar-bloco': telaEditarBloco, 'editar-textos': telaEditarTextos,
+  'editar-comp': telaEditarComp, catalogo: telaCatalogo, trocar: telaTrocar, escolher: telaEscolher,
   relatorios: telaRelatorios,
 };
 
@@ -264,7 +324,8 @@ function render() {
   ultimaPag = pag;
   const aba = {
     treino: 'hoje', finalizar: 'hoje', registrar: 'hoje', sessao: 'historico', exercicio: 'progresso',
-    ficha: 'treinos', 'editar-ex': 'treinos', 'editar-bloco': 'treinos', 'editar-textos': 'treinos',
+    ficha: 'treinos', 'editar-ex': 'treinos', 'editar-bloco': 'treinos', 'editar-textos': 'treinos', 'editar-comp': 'treinos',
+    catalogo: 'treinos', escolher: 'treinos', trocar: rotaAtual().arg === 'sessao' ? 'hoje' : 'treinos',
   }[pag] || pag;
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('sel', a.dataset.tab === aba));
   tick();
@@ -366,6 +427,24 @@ function abrirVideo(el) {
 }
 
 // ---------- Tela: Treino em execução ----------
+// Exercício complementar (preparação, core, mobilidade): mesmo formato da musculação,
+// com vídeo, dica e um botão por série. marcas = null mostra só a consulta (aba Treinos).
+function cartaoComplementar(g, c, i, marcas) {
+  return `<div class="ex">
+    <div class="linha entre"><div class="ex-nome">${esc(c.nome)}</div><span class="small muted">${c.series || 1} × ${esc(c.dose || '')}</span></div>
+    ${videoExercicio(c)}
+    ${c.dica ? `<details><summary>Dica de execução ▾</summary><p>${esc(c.dica)}</p></details>` : ''}
+    ${marcas ? `<div class="comp-series">${marcas.map((on, s) => `<button class="comp-serie ${on ? 'feita' : ''}" data-acao="comp-serie"
+      data-grupo="${g}" data-i="${i}" data-s="${s}">S${s + 1} ✓</button>`).join('')}</div>` : ''}
+  </div>`;
+}
+function cartaoSecaoComp(titulo, g, lista, marcas, avisosTxt = []) {
+  if (!lista.length && !avisosTxt.length) return '';
+  return `<div class="card"><h2>${esc(titulo)}</h2>
+    ${avisosTxt.map((x) => `<p class="small muted aviso">ⓘ ${esc(x)}</p>`).join('')}
+    ${lista.map((c, i) => cartaoComplementar(g, c, i, marcas ? marcas[i] : null)).join('')}</div>`;
+}
+
 function checkItem(grupo, i, texto, on) {
   return `<div class="check ${on ? 'on' : ''}" data-acao="check" data-grupo="${grupo}" data-i="${i}">
     <span class="caixa">✓</span><span class="txt small">${esc(texto)}</span></div>`;
@@ -389,23 +468,25 @@ function telaTreino() {
   h += `<div class="card"><details><summary class="small muted">Como executar ▾</summary><p class="small muted">${esc(t.instrucoes)}</p></details></div>`;
 
   h += `<div class="card"><h2>${esc(t.cardioInicial.titulo)}</h2>${checkItem('cardioIni', 0, t.cardioInicial.texto, a.checks.cardioIni)}</div>`;
-  h += `<div class="card"><h2>${esc(t.tituloPreparacao || 'Preparação')}</h2>${t.preparacao.map((p, i) => checkItem('prep', i, p, a.checks.prep[i])).join('')}</div>`;
+  h += cartaoSecaoComp(t.tituloPreparacao || 'Preparação', 'prep', t.preparacao, a.checks.prep, t.avisos);
 
   let n = 0;
-  for (const b of t.blocos) {
+  blocosEfetivos(t, a).forEach((b, bi) => {
     const meta = b.modo === 'series'
       ? `${b.voltas} séries por exercício · descanso ${b.descanso[0]}-${b.descanso[1]} s entre séries`
       : `${b.voltas} voltas · descanso ${b.descanso[0]}-${b.descanso[1]} s após cada volta`;
     h += `<div class="card"><div class="bloco-head"><h2>${esc(b.nome)} <span class="muted small">· ${esc(b.foco)}</span></h2></div>
       <p class="muted small">${meta}</p>`;
-    for (const ex of b.exercicios) {
+    b.exercicios.forEach((ex, ei) => {
       n++;
       const ult = ultimoRegistro(ex.id, a.id);
       const st = ult && statusProgressao(ex, ult.series);
       const unid = UNIDADE[ex.carga];
       h += `<div class="ex">
         <div class="linha entre"><span class="tag">${esc(ex.grupo)}</span><span class="small muted">${esc(faixaReps(ex))}</span></div>
-        <div class="ex-nome">${n} · ${esc(ex.nome)}</div>
+        <div class="linha entre"><div class="ex-nome">${n} · ${esc(ex.nome)}</div>
+          <a class="btn-mini trocar" href="#/trocar/sessao/${bi}/${ei}" aria-label="Trocar exercício">⇄ Trocar</a></div>
+        ${ex.slotId ? `<p class="small muted">No lugar de: ${esc(exInfo(ex.slotId).nome)} (só neste treino)</p>` : ''}
         ${videoExercicio(ex)}
         <details><summary>Dica de execução ▾</summary><p>${esc(ex.dica)}</p></details>
         <div class="ultima">${ult ? `Última (${fmtData(ult.sessao.data)}): ${resumoSeries(ult.series, ex)}${unid ? ' ' + unid : ''}`
@@ -427,12 +508,12 @@ function telaTreino() {
           <button class="ok-btn" data-acao="serie" aria-label="Concluir série">✓</button></div>`;
       });
       h += `</div>`;
-    }
+    });
     h += `</div>`;
-  }
+  });
 
-  if (t.core) h += `<div class="card"><h2>Core</h2>${t.core.map((p, i) => checkItem('core', i, p, a.checks.core?.[i])).join('')}</div>`;
-  h += `<div class="card"><h2>${esc(t.tituloMobilidade || 'Mobilidade')}</h2>${t.mobilidade.map((p, i) => checkItem('mob', i, p, a.checks.mob[i])).join('')}</div>`;
+  h += cartaoSecaoComp('Core', 'core', t.core || [], a.checks.core);
+  h += cartaoSecaoComp(t.tituloMobilidade || 'Mobilidade', 'mob', t.mobilidade, a.checks.mob);
   h += `<div class="card"><h2>${esc(t.cardioFinal.titulo)}</h2><p class="small muted">${esc(t.cardioFinal.texto)}</p><p class="small muted">Você marca se fez ao finalizar.</p></div>`;
   h += `<a class="btn" href="#/finalizar">Finalizar treino</a>
     <button class="btn perigo" data-acao="descartar">Descartar treino</button>`;
@@ -488,7 +569,7 @@ function salvarSessao() {
     nomes: {}, // cópia dos dados de cada exercício, para o histórico sobreviver a edições da ficha
     planejadas: contarSeries(fichaDe(a.treino), {}).total,
   };
-  for (const ex of exerciciosDe(fichaDe(a.treino))) {
+  for (const ex of blocosEfetivos(fichaDe(a.treino), a).flatMap((b) => b.exercicios)) {
     sessao.nomes[ex.id] = { nome: ex.nome, grupo: ex.grupo, carga: ex.carga, reps: ex.reps, lado: ex.lado || '' };
   }
   db.sessoes.push(sessao);
@@ -742,12 +823,18 @@ document.addEventListener('click', (e) => {
     else { a.checks[g] ??= []; a.checks[g][i] = !a.checks[g][i]; }
     el.classList.toggle('on'); salvar();
   }
+  else if (acao === 'comp-serie') {
+    const g = el.dataset.grupo, i = +el.dataset.i, s = +el.dataset.s;
+    const marcas = a.checks[g][i];
+    marcas[s] = !marcas[s];
+    el.classList.toggle('feita', marcas[s]); salvar();
+  }
 
   else if (acao === 'serie') {
     const linha = el.closest('.serie');
     const exId = linha.dataset.ex, i = +linha.dataset.i;
     const s = a.series[exId][i];
-    const blocos = fichaDe(a.treino).blocos;
+    const blocos = blocosEfetivos(fichaDe(a.treino), a);
     const bloco = blocos.find((b) => b.exercicios.some((x) => x.id === exId));
     const ex = bloco.exercicios.find((x) => x.id === exId);
     if (!s.ok) {

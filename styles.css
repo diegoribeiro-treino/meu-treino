@@ -139,6 +139,23 @@ body { padding-top: 0; }
 .opcoes button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
 textarea, .input-texto { width: 100%; font: inherit; color: var(--text); background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-top: 8px; }
 
+/* Exercícios complementares, troca e catálogo */
+.comp-series { display: flex; gap: 8px; margin-top: 10px; }
+.comp-serie { flex: 1; height: 44px; border-radius: 10px; border: 2px solid var(--line); background: transparent; color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; }
+.comp-serie.feita { background: var(--ok); border-color: var(--ok); color: #0b1a10; }
+.aviso { margin: 6px 0; }
+.btn-mini.trocar { flex: none; text-decoration: none; font-size: 13px; padding: 6px 10px; }
+.cat-item { padding: 10px 8px; border-top: 1px solid var(--line); cursor: pointer; border-radius: 8px; }
+.cat-item:first-child { border-top: 0; }
+.cat-item.sel { background: var(--accent-soft); outline: 1px solid var(--accent); }
+.cat-item.bloq { opacity: .45; cursor: default; }
+.cat-detalhe { margin-top: 8px; }
+.card h3:first-child { margin-top: 4px; }
+.link-btn { background: none; border: 0; color: var(--accent); font: inherit; font-size: 14px; padding: 10px 0 0; cursor: pointer; text-align: center; width: 100%; }
+.ed-ex { flex-wrap: wrap; }
+.ed-ex .ed-acoes { width: 100%; justify-content: flex-end; }
+.descanso .btn-fechar { min-width: 44px; min-height: 40px; font-size: 18px; }
+
 /* Login */
 body.sem-login { padding-bottom: 24px; }
 body.sem-login .nav { display: none; }
