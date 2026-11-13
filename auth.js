@@ -1,51 +1,35 @@
 'use strict';
 
-// Login e perfis. Tudo fica neste aparelho: as contas em localStorage (meutreino:contas),
-// cada uma com o próprio banco (ver chaveDados em app.js). As senhas nunca são guardadas:
-// só um hash PBKDF2-SHA256 com sal aleatório por conta.
-// Nenhuma conta pessoal fica no código. O primeiro acesso é criado no próprio celular;
-// só o perfil de demonstração (admin/admin) é fixo.
+// Login.
+// - Conta principal: e-mail e senha no Supabase (servidor.js). Os dados sincronizam com a nuvem,
+//   então o mesmo login funciona em qualquer ícone, no Safari ou em outro aparelho.
+// - Demonstração: login "admin" / senha "admin", perfil só deste aparelho (não vai ao servidor).
+// - Contas locais da versão anterior (por CPF) deixam de ser usadas; os treinos delas sobem para
+//   a conta do servidor no primeiro login (servidor.js -> dadosLocaisAntigos).
 
 const CONTAS_KEY = 'meutreino:contas';
-const SESSAO_KEY = 'meutreino:sessao';
+const SESSAO_KEY = 'meutreino:sessao'; // só a sessão da demonstração
 const ITERACOES = 150000;
 const DEMO = { id: 'demo', login: 'admin', senha: 'admin', nome: 'Demonstração' };
 
-let modoLogin = 'entrar'; // 'entrar' | 'criar' | 'redefinir'
-let falhas = 0, bloqueadoAte = 0;
+let modoLogin = 'entrar'; // 'entrar' | 'criar' | 'redefinir' | 'nova-senha'
+let avisoLogin = '';      // mensagem de sucesso mostrada na tela de login (ex.: "enviamos o e-mail")
 
-// ---------- Contas ----------
+// ---------- Contas locais (demonstração e contas antigas) ----------
 function lerContas() {
   try { return JSON.parse(localStorage.getItem(CONTAS_KEY)) || []; } catch (e) { return []; }
 }
 function gravarContas(contas) { localStorage.setItem(CONTAS_KEY, JSON.stringify(contas)); }
-const temDono = () => lerContas().some((c) => c.dono);
 
-// CPF pode ser digitado com ou sem pontos e traço; usuário ignora maiúsculas
-// CPF pode ser digitado com qualquer pontuação (inclusive o hífen e os espaços especiais que o
-// teclado do iPhone às vezes insere): sem letras, vale só os dígitos. Usuário ignora maiúsculas.
-function normLogin(s) {
-  const t = (s || '').normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toLowerCase();
-  return /\p{L}/u.test(t) ? t.replace(/\s+/g, '') : t.replace(/\D/g, '');
-}
-// Busca a conta comparando os dois lados já normalizados (contas antigas podem ter sido gravadas
-// com pontuação que a versão anterior não removia)
-const acharConta = (contas, login) => contas.find((c) => normLogin(c.login) === login);
-const normEmail = (s) => (s || '').trim().toLowerCase();
+const normEmail = (s) => (s || '').normalize('NFKC').replace(/[​-‍﻿]/g, '').trim().toLowerCase();
 const emailValido = (s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
 function mascararEmail(e) {
   const [u, d] = (e || '').split('@');
-  return d ? `${u.slice(0, 2)}***@${d}` : '';
-}
-
-function mascararLogin(login) {
-  const d = normLogin(login);
-  return /^\d{11}$/.test(d) ? `${d.slice(0, 3)}.***.***-${d.slice(9)}` : login;
+  return d ? `${u.slice(0, 2)}***@${d}` : e || '';
 }
 
 const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const deB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-
 async function hashSenha(senha, salt, iteracoes = ITERACOES) {
   const chave = await crypto.subtle.importKey('raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: deB64(salt), iterations: iteracoes }, chave, 256);
@@ -58,26 +42,54 @@ async function novaCredencial(senha) {
 async function conferirSenha(conta, senha) {
   return (await hashSenha(senha, conta.salt, conta.iteracoes)) === conta.hash;
 }
-
-async function garantirDemo() {
+async function contaDemo() {
   const contas = lerContas();
-  if (contas.some((c) => c.id === DEMO.id)) return;
-  contas.push({ id: DEMO.id, login: DEMO.login, nome: DEMO.nome, demo: true, ...(await novaCredencial(DEMO.senha)) });
-  gravarContas(contas);
+  let demo = contas.find((c) => c.id === DEMO.id);
+  if (!demo) {
+    demo = { id: DEMO.id, login: DEMO.login, nome: DEMO.nome, demo: true, ...(await novaCredencial(DEMO.senha)) };
+    contas.push(demo); gravarContas(contas);
+  }
+  return demo;
 }
 
-function contaDaSessao() {
-  const id = localStorage.getItem(SESSAO_KEY);
-  return id ? lerContas().find((c) => c.id === id) || null : null;
+// ---------- Sessão ----------
+// Chamado uma vez ao abrir o app (app.js), antes da primeira tela
+async function iniciarSessao() {
+  if (localStorage.getItem(SESSAO_KEY) === DEMO.id) { abrirConta(await contaDemo()); return; }
+  const recuperacao = /type=recovery/.test(HASH_INICIAL);
+  const veioDeLink = /access_token=/.test(HASH_INICIAL);
+  let sessao = null, falhou = false;
+  try {
+    const { data, error } = await sb.auth.getSession();
+    sessao = data.session; falhou = !!error;
+  } catch (e) { falhou = true; }
+  if (veioDeLink) history.replaceState(null, '', `${URL_APP}#/hoje`);
+  if (sessao && recuperacao) { modoLogin = 'nova-senha'; return; }
+  if (sessao) { entrarServidor(sessao.user); return; }
+  // Sem internet com o token vencido: abre a cópia do último usuário e sincroniza depois
+  const lembrado = usuarioLembrado();
+  if (lembrado && (falhou || !navigator.onLine)) { abrirConta(contaDoUsuario(lembrado)); estadoSync.situacao = 'pendente'; }
 }
-function entrar(conta) {
-  localStorage.setItem(SESSAO_KEY, conta.id);
-  abrirConta(conta);
-  falhas = 0;
-  location.hash = '#/hoje';
+
+function entrarServidor(user) {
+  lembrarUsuario(user);
+  localStorage.removeItem(SESSAO_KEY);
+  abrirConta(contaDoUsuario(user));
+  sincronizarAoAbrir();
+}
+
+function irParaApp() {
+  avisoLogin = ''; modoLogin = 'entrar';
+  if (!/^#\/[a-z]/.test(location.hash)) location.hash = '#/hoje';
   render();
 }
-function sair() {
+
+async function sair() {
+  if (contaAtual?.servidor) {
+    await enviarAoServidor();
+    try { await sb.auth.signOut(); } catch (e) { /* offline: a sessão local é apagada mesmo assim */ }
+    localStorage.removeItem(USUARIO_KEY);
+  }
   localStorage.removeItem(SESSAO_KEY);
   contaAtual = null;
   db = novoDb();
@@ -85,175 +97,165 @@ function sair() {
   render();
 }
 
-// ---------- Tela de login ----------
-function telaLogin() {
-  const criando = modoLogin === 'criar';
-  const subtitulo = { criar: 'Crie o seu acesso neste celular', redefinir: 'Redefina a sua senha', entrar: 'Entre para acessar seus treinos' }[modoLogin];
-  const topo = `<div class="login-topo"><img src="icons/icon-192.png" alt="" class="login-logo"><h1>Meu Treino</h1>
-    <p class="muted small">${subtitulo}</p></div>`;
-  if (modoLogin === 'redefinir') {
-    return `<div class="login">${topo}
-      <form class="card form" data-form="redefinir" autocomplete="on">
-        <label>CPF ou usuário<input class="input-texto" name="login" autocomplete="username" autocapitalize="none" required></label>
-        <label>E-mail da conta<input class="input-texto" type="email" name="email" autocomplete="email" autocapitalize="none" required></label>
-        <p class="muted small" style="margin:0">Se a conta ainda não tiver e-mail, este passa a ser o e-mail cadastrado.</p>
-        <label>Nova senha (mínimo 6 caracteres)<input class="input-texto" type="password" name="senha" autocomplete="new-password" required></label>
-        <label>Confirme a nova senha<input class="input-texto" type="password" name="senha2" autocomplete="new-password" required></label>
-        <p class="login-erro small" id="login-erro" hidden></p>
-        <button class="btn" type="submit">Redefinir senha e entrar</button>
-      </form>
-      ${temDono() ? '' : `<div class="card small">Nenhum acesso foi criado neste aparelho ainda.
-        <button class="btn sec" data-acao="login-modo" data-modo="criar">Criar meu acesso</button></div>`}
-      <button class="btn sec" data-acao="login-modo" data-modo="entrar">Voltar ao login</button></div>`;
-  }
-  if (criando) {
-    return `<div class="login">${topo}
-      <form class="card form" data-form="criar" autocomplete="on">
-        <label>Seu nome<input class="input-texto" name="nome" autocomplete="name" required></label>
-        <label>CPF ou usuário<input class="input-texto" name="login" autocomplete="username" autocapitalize="none" required></label>
-        <label>E-mail (para redefinir a senha)<input class="input-texto" type="email" name="email" autocomplete="email" autocapitalize="none" required></label>
-        <label>Senha (mínimo 6 caracteres)<input class="input-texto" type="password" name="senha" autocomplete="new-password" required></label>
-        <label>Confirme a senha<input class="input-texto" type="password" name="senha2" autocomplete="new-password" required></label>
-        ${localStorage.getItem(CHAVE_ANTIGA) ? '<p class="muted small">Os treinos já registrados neste celular passarão para este perfil.</p>' : ''}
-        <button class="btn" type="submit">Criar acesso e entrar</button>
-      </form>
-      <button class="btn sec" data-acao="login-modo" data-modo="entrar">Já tenho acesso</button></div>`;
-  }
-  return `<div class="login">${topo}
-    <form class="card form" data-form="entrar" autocomplete="on">
-      <label>CPF ou usuário<input class="input-texto" name="login" autocomplete="username" autocapitalize="none" required></label>
-      <label>Senha<div class="linha"><input class="input-texto cresce" type="password" name="senha" autocomplete="current-password" required>
-        <button type="button" class="btn-mini" data-acao="ver-senha" aria-label="Mostrar senha">👁</button></div></label>
-      <p class="login-erro small" id="login-erro" hidden></p>
-      <button class="btn" type="submit">Entrar</button>
-      <button type="button" class="link-btn" data-acao="login-modo" data-modo="redefinir">Esqueci minha senha</button>
-    </form>
-    ${temDono() ? '' : `<div class="card small">Primeiro acesso neste celular?
-      <button class="btn sec" data-acao="login-modo" data-modo="criar">Criar meu acesso</button></div>`}</div>`;
+// Mensagens do Supabase em português
+function traduzErro(error) {
+  const m = (error && error.message) || '';
+  if (/Invalid login credentials/i.test(m)) return 'E-mail ou senha incorretos.';
+  if (/Email not confirmed/i.test(m)) return 'Confirme seu e-mail pelo link que enviamos (veja também a caixa de spam).';
+  if (/already registered|already been registered/i.test(m)) return 'Já existe uma conta com esse e-mail. Use "Entrar" ou "Esqueci minha senha".';
+  if (/rate limit|too many/i.test(m)) return 'Muitas tentativas ou e-mails seguidos. Aguarde alguns minutos e tente de novo.';
+  if (/Password should be|weak/i.test(m)) return 'Senha fraca: use pelo menos 6 caracteres.';
+  if (/fetch|network|Failed to/i.test(m)) return 'Sem conexão com o servidor. Verifique a internet.';
+  return m || 'Não foi possível concluir. Tente de novo.';
 }
 
-function dicaContas() {
-  const contas = lerContas().filter((c) => !c.demo);
-  return contas.length
-    ? `Contas neste aparelho: ${contas.map((c) => mascararLogin(c.login)).join(', ')}.`
-    : 'Nenhum acesso foi criado neste aparelho ainda: use "Criar meu acesso".';
+// ---------- Telas ----------
+function telaLogin() {
+  const subtitulo = {
+    entrar: 'Entre para acessar seus treinos', criar: 'Crie sua conta',
+    redefinir: 'Redefina a sua senha', 'nova-senha': 'Escolha a nova senha',
+  }[modoLogin];
+  const topo = `<div class="login-topo"><img src="icons/icon-192.png" alt="" class="login-logo"><h1>Meu Treino</h1>
+    <p class="muted small">${subtitulo}</p></div>`;
+  const erro = '<p class="login-erro small" id="login-erro" hidden></p>';
+  const aviso = avisoLogin ? `<div class="card destaque small">${esc(avisoLogin)}</div>` : '';
+  const voltar = '<button class="btn sec" data-acao="login-modo" data-modo="entrar">Voltar ao login</button>';
+
+  if (modoLogin === 'nova-senha') {
+    return `<div class="login">${topo}
+      <form class="card form" data-form="nova-senha">
+        <label>Nova senha (mínimo 6 caracteres)<input class="input-texto" type="password" name="senha" autocomplete="new-password" required></label>
+        <label>Confirme a nova senha<input class="input-texto" type="password" name="senha2" autocomplete="new-password" required></label>
+        ${erro}<button class="btn" type="submit">Salvar e entrar</button>
+      </form></div>`;
+  }
+  if (modoLogin === 'redefinir') {
+    return `<div class="login">${topo}${aviso}
+      <form class="card form" data-form="redefinir">
+        <label>E-mail da conta<input class="input-texto" type="email" name="email" autocomplete="email" autocapitalize="none" required></label>
+        <p class="muted small" style="margin:0">Enviamos um link para criar uma nova senha. Abra o link no próprio celular.</p>
+        ${erro}<button class="btn" type="submit">Enviar link</button>
+      </form>${voltar}</div>`;
+  }
+  if (modoLogin === 'criar') {
+    return `<div class="login">${topo}${aviso}
+      <form class="card form" data-form="criar">
+        <label>Seu nome<input class="input-texto" name="nome" autocomplete="name" required></label>
+        <label>E-mail<input class="input-texto" type="email" name="email" autocomplete="email" autocapitalize="none" required></label>
+        <label>Senha (mínimo 6 caracteres)<input class="input-texto" type="password" name="senha" autocomplete="new-password" required></label>
+        <label>Confirme a senha<input class="input-texto" type="password" name="senha2" autocomplete="new-password" required></label>
+        <p class="muted small" style="margin:0">Os treinos que já estão neste celular vão para a sua conta.</p>
+        ${erro}<button class="btn" type="submit">Criar conta</button>
+      </form>${voltar}</div>`;
+  }
+  return `<div class="login">${topo}${aviso}
+    <form class="card form" data-form="entrar">
+      <label>E-mail<input class="input-texto" name="email" inputmode="email" autocomplete="username" autocapitalize="none" required></label>
+      <label>Senha<div class="linha"><input class="input-texto cresce" type="password" name="senha" autocomplete="current-password" required>
+        <button type="button" class="btn-mini" data-acao="ver-senha" aria-label="Mostrar senha">👁</button></div></label>
+      ${erro}<button class="btn" type="submit">Entrar</button>
+      <button type="button" class="link-btn" data-acao="login-modo" data-modo="redefinir">Esqueci minha senha</button>
+    </form>
+    <div class="card small">Ainda não tem conta?
+      <button class="btn sec" data-acao="login-modo" data-modo="criar">Criar conta</button></div></div>`;
 }
-const AVISO_IPHONE = 'No iPhone, o app aberto pelo ícone da tela inicial e o Safari guardam dados separados: '
-  + 'a conta só existe onde foi criada.';
 
 function erroLogin(msg) {
   const el = $('#login-erro');
   if (el) { el.textContent = msg; el.hidden = false; } else toast(msg);
 }
+function ocupado(form, texto) {
+  const b = form.querySelector('button[type=submit]');
+  const original = b.textContent;
+  b.disabled = true; b.textContent = texto;
+  return () => { b.disabled = false; b.textContent = original; };
+}
 
 async function enviarLogin(form) {
-  if (Date.now() < bloqueadoAte) return erroLogin(`Muitas tentativas. Aguarde ${Math.ceil((bloqueadoAte - Date.now()) / 1000)} s.`);
-  const login = normLogin(form.login.value), senha = form.senha.value;
-  const botao = form.querySelector('button[type=submit]');
-  botao.disabled = true; botao.textContent = 'Entrando...';
-  try {
-    await garantirDemo();
-    const conta = acharConta(lerContas(), login);
-    if (conta && (await conferirSenha(conta, senha))) return entrar(conta);
-    falhas++;
-    if (falhas >= 5) { bloqueadoAte = Date.now() + 30000; falhas = 0; }
-    erroLogin(conta ? 'Senha incorreta. Se esqueceu, use "Esqueci minha senha".'
-      : `Não há conta com esse CPF/usuário neste aparelho. ${dicaContas()} ${AVISO_IPHONE}`);
-  } finally {
-    botao.disabled = false; botao.textContent = 'Entrar';
+  const email = normEmail(form.email.value), senha = form.senha.value;
+  if (email === DEMO.login) {
+    const demo = await contaDemo();
+    if (!(await conferirSenha(demo, senha))) return erroLogin('Senha incorreta.');
+    localStorage.setItem(SESSAO_KEY, DEMO.id);
+    abrirConta(demo);
+    return irParaApp();
   }
+  if (!emailValido(email)) return erroLogin('Informe o e-mail da conta.');
+  const pronto = ocupado(form, 'Entrando...');
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: senha });
+  pronto();
+  if (error) return erroLogin(traduzErro(error));
+  entrarServidor(data.user);
+  irParaApp();
 }
 
-async function enviarCriacao(form, { dono }) {
-  const nome = form.nome.value.trim(), login = normLogin(form.login.value), senha = form.senha.value;
-  const email = normEmail(form.email?.value);
-  if (!nome || !login) return toast('Preencha nome e login');
-  if (!emailValido(email)) return toast('Informe um e-mail válido');
-  if (login === DEMO.login) return toast('Este login é reservado para a demonstração');
-  if (senha.length < 6) return toast('A senha precisa ter pelo menos 6 caracteres');
-  if (senha !== form.senha2.value) return toast('As senhas não conferem');
-  const contas = lerContas();
-  if (acharConta(contas, login)) return toast('Já existe um perfil com esse login');
-  const conta = { id: uid(), login, nome, email, dono, ...(await novaCredencial(senha)) };
-  contas.push(conta);
-  gravarContas(contas);
-  // O primeiro perfil (dono) herda os dados de antes do login
-  const antigo = localStorage.getItem(CHAVE_ANTIGA);
-  if (dono && antigo) { localStorage.setItem(chaveDados(conta.id), antigo); localStorage.removeItem(CHAVE_ANTIGA); }
-  return conta;
-}
-
-// Redefinição de senha neste aparelho: confere login + e-mail cadastrado.
-// Conta sem e-mail (criada antes desta opção) recebe o e-mail informado aqui.
-async function enviarRedefinicao(form) {
-  if (Date.now() < bloqueadoAte) return erroLogin(`Muitas tentativas. Aguarde ${Math.ceil((bloqueadoAte - Date.now()) / 1000)} s.`);
-  const login = normLogin(form.login.value), email = normEmail(form.email.value), senha = form.senha.value;
+async function enviarCriacao(form) {
+  const nome = form.nome.value.trim(), email = normEmail(form.email.value), senha = form.senha.value;
+  if (!nome) return erroLogin('Informe seu nome.');
   if (!emailValido(email)) return erroLogin('Informe um e-mail válido.');
   if (senha.length < 6) return erroLogin('A senha precisa ter pelo menos 6 caracteres.');
   if (senha !== form.senha2.value) return erroLogin('As senhas não conferem.');
-  const contas = lerContas();
-  const conta = acharConta(contas.filter((c) => !c.demo), login);
-  if (!conta || (conta.email && conta.email !== email)) {
-    falhas++;
-    if (falhas >= 5) { bloqueadoAte = Date.now() + 30000; falhas = 0; }
-    return erroLogin(!conta
-      ? `Não há conta com esse CPF/usuário neste aparelho. ${dicaContas()} ${AVISO_IPHONE}`
-      : `Esse não é o e-mail cadastrado nesta conta (${mascararEmail(conta.email)}).`);
-  }
-  conta.email ||= email;
-  conta.login = normLogin(conta.login);
-  Object.assign(conta, await novaCredencial(senha));
-  gravarContas(contas);
-  toast('Senha redefinida');
-  entrar(conta);
+  const pronto = ocupado(form, 'Criando...');
+  const { data, error } = await sb.auth.signUp({ email, password: senha, options: { data: { nome }, emailRedirectTo: URL_APP } });
+  pronto();
+  if (error) return erroLogin(traduzErro(error));
+  if (data.session) { toast(`Bem-vindo, ${nome.split(' ')[0]}!`); entrarServidor(data.user); return irParaApp(); }
+  avisoLogin = `Conta criada. Enviamos um e-mail para ${email}: toque no link para confirmar e depois entre aqui.`;
+  modoLogin = 'entrar'; render();
 }
 
-// ---------- Ajustes: conta e perfis ----------
+async function enviarRedefinicao(form) {
+  const email = normEmail(form.email.value);
+  if (!emailValido(email)) return erroLogin('Informe um e-mail válido.');
+  const pronto = ocupado(form, 'Enviando...');
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: URL_APP });
+  pronto();
+  if (error) return erroLogin(traduzErro(error));
+  avisoLogin = `Se houver uma conta com ${email}, você vai receber um e-mail com o link para criar a nova senha (veja também o spam).`;
+  render();
+}
+
+async function enviarNovaSenha(form) {
+  const senha = form.senha.value;
+  if (senha.length < 6) return erroLogin('A senha precisa ter pelo menos 6 caracteres.');
+  if (senha !== form.senha2.value) return erroLogin('As senhas não conferem.');
+  const pronto = ocupado(form, 'Salvando...');
+  const { data, error } = await sb.auth.updateUser({ password: senha });
+  pronto();
+  if (error) return erroLogin(traduzErro(error));
+  toast('Senha alterada');
+  entrarServidor(data.user);
+  irParaApp();
+}
+
+// ---------- Ajustes: conta ----------
 function cartaoConta() {
   const c = contaAtual;
-  const outros = c.dono ? lerContas().filter((x) => x.id !== c.id) : [];
+  if (c.demo) {
+    return `<div class="card"><h2>Conta</h2>
+      <div class="linha entre"><div><b>${esc(c.nome)}</b><div class="muted small">admin · demonstração</div></div>
+        <button class="btn-mini" data-acao="sair">Sair</button></div>
+      <p class="muted small" style="margin-top:10px">Perfil para mostrar o app. Fica só neste aparelho e não afeta a sua conta.</p>
+      <button class="btn sec" data-acao="demo-gerar">Carregar treinos de exemplo</button></div>`;
+  }
   return `<div class="card"><h2>Conta</h2>
-    <div class="linha entre"><div><b>${esc(c.nome)}</b><div class="muted small">${esc(mascararLogin(c.login))}${c.email ? ` · ${esc(mascararEmail(c.email))}` : ''}${c.dono ? ' · dono' : ''}${c.demo ? ' · demonstração' : ''}</div></div>
+    <div class="linha entre"><div><b>${esc(c.nome)}</b><div class="muted small">${esc(c.email || '')}</div></div>
       <button class="btn-mini" data-acao="sair">Sair</button></div>
-    ${c.demo ? `<p class="muted small" style="margin-top:10px">Perfil para mostrar o app. Tem banco próprio: nada aqui afeta os outros perfis.</p>
-      <button class="btn sec" data-acao="demo-gerar">Carregar treinos de exemplo</button>` : `
-    <form class="form" data-form="email" style="margin-top:10px">
-      <label>E-mail para redefinir a senha<div class="linha"><input class="input-texto cresce" type="email" name="email" value="${esc(c.email || '')}" placeholder="seu@email.com" autocapitalize="none">
-        <button class="btn-mini" type="submit">Salvar</button></div></label>
-      ${c.email ? '' : '<p class="small" style="color:var(--accent);margin:0">Cadastre um e-mail para poder redefinir a senha.</p>'}
-    </form>
+    <div class="linha entre small" style="margin-top:10px"><span class="muted" id="texto-sync">${esc(textoSync())}</span>
+      <button class="btn-mini" data-acao="sincronizar">Sincronizar</button></div>
     <details style="margin-top:10px"><summary class="small muted">Trocar senha ▾</summary>
-      <form class="form" data-form="senha">
-        <label>Senha atual<input class="input-texto" type="password" name="atual" autocomplete="current-password" required></label>
+      <form class="form" data-form="trocar-senha">
         <label>Nova senha<input class="input-texto" type="password" name="senha" autocomplete="new-password" required></label>
         <label>Confirme a nova senha<input class="input-texto" type="password" name="senha2" autocomplete="new-password" required></label>
         <button class="btn" type="submit">Salvar nova senha</button>
-      </form></details>`}
-    ${c.dono ? `<h3 style="margin-top:16px">Perfis neste celular</h3>
-      ${outros.map((x) => `<div class="linha entre small" style="padding:8px 0;border-top:1px solid var(--line)">
-        <span><b>${esc(x.nome)}</b> <span class="muted">· ${esc(mascararLogin(x.login))}</span></span>
-        ${x.demo ? '<span class="muted">demonstração</span>' : `<button class="btn-mini" data-acao="perfil-apagar" data-id="${x.id}">Apagar</button>`}</div>`).join('')}
-      <details style="margin-top:8px"><summary class="small muted">+ Criar outro perfil ▾</summary>
-        <form class="form" data-form="novo-perfil">
-          <label>Nome<input class="input-texto" name="nome" required></label>
-          <label>CPF ou usuário<input class="input-texto" name="login" autocapitalize="none" required></label>
-          <label>E-mail<input class="input-texto" type="email" name="email" autocapitalize="none" required></label>
-          <label>Senha (mínimo 6 caracteres)<input class="input-texto" type="password" name="senha" autocomplete="new-password" required></label>
-          <label>Confirme a senha<input class="input-texto" type="password" name="senha2" autocomplete="new-password" required></label>
-          <button class="btn" type="submit">Criar perfil</button>
-        </form></details>` : ''}
-  </div>`;
+      </form></details></div>`;
 }
 
 async function trocarSenha(form) {
-  const contas = lerContas();
-  const conta = contas.find((c) => c.id === contaAtual.id);
-  if (!(await conferirSenha(conta, form.atual.value))) return toast('Senha atual incorreta');
   if (form.senha.value.length < 6) return toast('A senha precisa ter pelo menos 6 caracteres');
   if (form.senha.value !== form.senha2.value) return toast('As senhas não conferem');
-  Object.assign(conta, await novaCredencial(form.senha.value));
-  gravarContas(contas);
-  contaAtual = conta;
+  const { error } = await sb.auth.updateUser({ password: form.senha.value });
+  if (error) return toast(traduzErro(error));
   toast('Senha alterada'); render();
 }
 
@@ -294,49 +296,39 @@ function gerarDemo() {
 }
 
 // ---------- Eventos ----------
-document.addEventListener('submit', async (e) => {
+document.addEventListener('submit', (e) => {
   const form = e.target.closest('form[data-form]');
   if (!form) return;
   e.preventDefault();
-  const tipo = form.dataset.form;
-  if (tipo === 'entrar') return enviarLogin(form);
-  if (tipo === 'redefinir') return enviarRedefinicao(form);
-  if (tipo === 'email' && contaAtual && !contaAtual.demo) {
-    const email = normEmail(form.email.value);
-    if (!emailValido(email)) return toast('Informe um e-mail válido');
-    const contas = lerContas();
-    const conta = contas.find((c) => c.id === contaAtual.id);
-    conta.email = email; gravarContas(contas); contaAtual = conta;
-    toast('E-mail salvo'); return render();
-  }
-  if (tipo === 'criar') {
-    const conta = await enviarCriacao(form, { dono: true });
-    if (conta) { toast(`Bem-vindo, ${conta.nome.split(' ')[0]}!`); entrar(conta); }
-  } else if (tipo === 'novo-perfil' && contaAtual?.dono) {
-    const conta = await enviarCriacao(form, { dono: false });
-    if (conta) { toast('Perfil criado'); render(); }
-  } else if (tipo === 'senha') trocarSenha(form);
+  const acoes = {
+    entrar: enviarLogin, criar: enviarCriacao, redefinir: enviarRedefinicao,
+    'nova-senha': enviarNovaSenha, 'trocar-senha': trocarSenha,
+  };
+  const fn = acoes[form.dataset.form];
+  if (fn) fn(form).catch((err) => erroLogin(traduzErro(err)));
 });
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-acao]');
   if (!el) return;
   const acao = el.dataset.acao;
-  if (acao === 'login-modo') { modoLogin = el.dataset.modo; render(); }
+  if (acao === 'login-modo') { modoLogin = el.dataset.modo; avisoLogin = ''; render(); }
   else if (acao === 'ver-senha') {
     const inp = el.parentElement.querySelector('input');
     inp.type = inp.type === 'password' ? 'text' : 'password';
   } else if (acao === 'sair') {
-    if (confirm('Sair desta conta? Seus dados continuam salvos neste celular.')) sair();
-  } else if (acao === 'perfil-apagar' && contaAtual?.dono) {
-    const conta = lerContas().find((c) => c.id === el.dataset.id);
-    if (!conta || conta.demo || conta.id === contaAtual.id) return;
-    if (!confirm(`Apagar o perfil "${conta.nome}" e todos os treinos dele? Não dá para desfazer.`)) return;
-    gravarContas(lerContas().filter((c) => c.id !== conta.id));
-    localStorage.removeItem(chaveDados(conta.id));
-    toast('Perfil apagado'); render();
+    const msg = contaAtual?.servidor
+      ? 'Sair desta conta? Seus treinos ficam salvos no servidor; para entrar de novo use e-mail e senha.'
+      : 'Sair da demonstração?';
+    if (confirm(msg)) sair();
+  } else if (acao === 'sincronizar' && contaAtual?.servidor) {
+    toast('Sincronizando...');
+    sincronizarAoAbrir().then(() => toast(textoSync()));
   } else if (acao === 'demo-gerar' && contaAtual?.demo) {
     if (db.sessoes.length && !confirm('Substituir os dados deste perfil de demonstração por treinos de exemplo?')) return;
     gerarDemo(); toast('Treinos de exemplo carregados'); location.hash = '#/relatorios';
   }
 });
+
+// Mantém o texto de sincronização atualizado quando a tela de Ajustes está aberta
+setInterval(() => { const el = $('#texto-sync'); if (el && contaAtual?.servidor) el.textContent = textoSync(); }, 2000);

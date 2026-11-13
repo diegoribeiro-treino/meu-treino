@@ -27,18 +27,22 @@ function carregar(contaId) {
   return novoDb();
 }
 let db = novoDb();
+// Cada alteração fica no celular na hora e, na conta do servidor, é enviada logo depois (servidor.js)
 function salvar() {
   if (!contaAtual) return;
+  db.atualizadoEm = Date.now();
   try { localStorage.setItem(chaveDados(contaAtual.id), JSON.stringify(db)); }
   catch (e) { toast('Não foi possível salvar no aparelho'); }
+  if (contaAtual.servidor) agendarEnvio();
 }
+// Abre a cópia local da conta. Na conta do servidor, a busca, a junção com dados antigos
+// e a importação do histórico ficam com sincronizarAoAbrir (servidor.js).
 function abrirConta(conta) {
   contaAtual = conta;
   db = carregar(conta.id);
   fichaEscolhida = null;
   migrarFichas();
-  if (conta.dono) importarHistorico(); // importacao.js
-  salvar();
+  if (!conta.servidor) salvar();
 }
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
@@ -302,7 +306,7 @@ function rotaAtual() {
   return { pag, arg: args[0], args };
 }
 
-// As telas de editor.js (Treinos), catalogo.js, relatorios.js e auth.js são carregadas antes deste arquivo
+// As telas de editor.js (Treinos), catalogo.js, relatorios.js e auth.js (com servidor.js) são carregadas antes deste arquivo
 const telas = {
   hoje: telaHoje, registrar: telaRegistrar, treino: telaTreino, finalizar: telaFinalizar, historico: telaHistorico, sessao: telaSessao,
   progresso: telaProgresso, exercicio: telaExercicio, ajustes: telaAjustes,
@@ -738,7 +742,7 @@ function cartaoPerfil() {
   const idade = idadeEm(p.nascimento);
   const i = imc();
   return `<div class="card"><h2>Meus dados</h2>
-    <p class="muted small">Usados nos relatórios (estimativa de calorias e IMC). Ficam só neste celular.</p>
+    <p class="muted small">Usados nos relatórios (estimativa de calorias e IMC). Ficam salvos na sua conta.</p>
     <div class="form">
       <label>Data de nascimento<input type="date" class="input-texto" data-perfil="nascimento" value="${esc(p.nascimento)}"></label>
       <label>Altura (cm)<input inputmode="numeric" class="input-texto" data-perfil="altura" value="${esc(p.altura)}" placeholder="ex.: 178"></label>
@@ -955,6 +959,5 @@ document.addEventListener('keydown', (e) => {
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-const contaSalva = contaDaSessao();
-if (contaSalva) abrirConta(contaSalva);
-render();
+app.innerHTML = '<div class="vazio">Carregando...</div>';
+iniciarSessao().catch(() => {}).finally(render);
